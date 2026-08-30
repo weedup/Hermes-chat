@@ -1,0 +1,6 @@
+{
+  "name": "Hermes Chat",
+  "description": "Cliente nativo para servidor Hermes LLM local no Termux (porta 9119) com tema Azul Escuro e Ouro Olímpico para Galaxy S26 Ultra.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
