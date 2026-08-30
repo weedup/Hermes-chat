@@ -5,6 +5,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logger
@@ -44,9 +45,9 @@ class HermesApiClient {
             json(jsonConfig)
         }
         install(HttpTimeout) {
-            requestTimeoutMillis = 90_000
-            connectTimeoutMillis = 15_000
-            socketTimeoutMillis = 90_000
+            requestTimeoutMillis = 60_000
+            connectTimeoutMillis = 8_000
+            socketTimeoutMillis = 60_000
         }
         install(Logging) {
             level = LogLevel.INFO
@@ -74,9 +75,14 @@ class HermesApiClient {
         val startTime = System.currentTimeMillis()
 
         try {
-            // First check root / dashboard
+            // Check root with a responsive timeout
             val response: HttpResponse = client.get(normalized) {
                 header(HttpHeaders.Accept, "*/*")
+                timeout {
+                    requestTimeoutMillis = 3_000
+                    connectTimeoutMillis = 3_000
+                    socketTimeoutMillis = 3_000
+                }
             }
             val latency = System.currentTimeMillis() - startTime
             val serverHeader = response.headers[HttpHeaders.Server] ?: "Hermes-Termux-Server"
@@ -91,12 +97,17 @@ class HermesApiClient {
             )
         } catch (e: Exception) {
             val latency = System.currentTimeMillis() - startTime
-            Log.e("HermesApiClient", "Health check failed for $normalized", e)
+            Log.d("HermesApiClient", "Server $normalized is not reachable yet: ${e.message}")
 
-            // Try fallback endpoint /v1/models or /health
+            // Try fallback endpoint /v1/models or /health with short timeout
             try {
                 val fallbackUrl = "${normalized.removeSuffix("/")}/v1/models"
-                val fallbackResponse: HttpResponse = client.get(fallbackUrl)
+                val fallbackResponse: HttpResponse = client.get(fallbackUrl) {
+                    timeout {
+                        requestTimeoutMillis = 2_000
+                        connectTimeoutMillis = 2_000
+                    }
+                }
                 val fallbackLatency = System.currentTimeMillis() - startTime
                 if (fallbackResponse.status.isSuccess()) {
                     return@withContext ServerHealth(
@@ -114,13 +125,14 @@ class HermesApiClient {
 
             val humanError = when {
                 e.message?.contains("Failed to connect", ignoreCase = true) == true ||
-                e.message?.contains("Connection refused", ignoreCase = true) == true ->
-                    "Ligação recusada em $normalized. Verifica se o servidor Hermes está a correr no Termux (porta 9119)."
+                e.message?.contains("Connection refused", ignoreCase = true) == true ||
+                e.message?.contains("ECONNREFUSED", ignoreCase = true) == true ->
+                    "Servidor offline em $normalized. Inicie o script no Termux na porta 9119."
                 e.message?.contains("CLEARTEXT", ignoreCase = true) == true ->
                     "Tráfego HTTP sem encriptação bloqueado pelo Android. (usesCleartextTraffic ativo)"
                 e.message?.contains("timeout", ignoreCase = true) == true ->
-                    "Tempo limite esgotado a contactar o servidor Hermes."
-                else -> e.localizedMessage ?: "Erro desconhecido ao ligar ao servidor."
+                    "Tempo limite esgotado a contactar o servidor Hermes ($normalized)."
+                else -> e.localizedMessage ?: "Servidor inacessível no momento."
             }
 
             ServerHealth(
@@ -260,6 +272,10 @@ class HermesApiClient {
             try {
                 val response: HttpResponse = client.get(endpoint) {
                     header(HttpHeaders.Accept, "application/json")
+                    timeout {
+                        requestTimeoutMillis = 3_000
+                        connectTimeoutMillis = 3_000
+                    }
                 }
                 if (response.status.isSuccess()) {
                     val body = response.bodyAsText()
@@ -314,7 +330,12 @@ class HermesApiClient {
         val normalized = normalizeUrl(baseUrl)
         val endpoint = "${normalized.removeSuffix("/")}/v1/models"
         try {
-            val response: HttpResponse = client.get(endpoint)
+            val response: HttpResponse = client.get(endpoint) {
+                timeout {
+                    requestTimeoutMillis = 3_000
+                    connectTimeoutMillis = 3_000
+                }
+            }
             if (response.status.isSuccess()) {
                 val parsed = jsonConfig.decodeFromString<ModelsListResponse>(response.bodyAsText())
                 val models = parsed.data.map { it.id }.filter { it.isNotBlank() }
