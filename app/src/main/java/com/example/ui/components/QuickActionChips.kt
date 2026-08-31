@@ -42,29 +42,29 @@ data class QuickPrompt(
 
 val defaultQuickPrompts = listOf(
     QuickPrompt(
-        title = "Estado Hermes",
-        prompt = "Olá Hermes! Podes confirmar os teus parâmetros de sistema e estado no servidor local?",
+        title = "O que sabes de mim?",
+        prompt = "O que sabes sobre mim? Dá um resumo do meu perfil e da nossa conversa até agora.",
         icon = Icons.Default.Info
     ),
     QuickPrompt(
-        title = "Comandos Termux",
-        prompt = "Quais são os comandos úteis para gerir serviços e pacotes dentro do proot no Termux?",
+        title = "Dica de guitarra",
+        prompt = "Dá-me um exercício rápido para melhorar a transição entre acordes na guitarra clássica, focado no meu repertório atual.",
+        icon = Icons.Default.AutoAwesome
+    ),
+    QuickPrompt(
+        title = "Estado do Hermes",
+        prompt = "Mostra um resumo do estado atual do Hermes: portas, processos, skills carregadas e memória.",
         icon = Icons.Default.Terminal
     ),
     QuickPrompt(
-        title = "Gerar Script Python",
-        prompt = "Escreve um script Python eficiente com docstrings e type hints para processar dados.",
+        title = "Resume esta conversa",
+        prompt = "Faz um resumo conciso dos pontos principais que tratámos nesta conversa.",
         icon = Icons.Default.Code
     ),
     QuickPrompt(
-        title = "Benchmark Rápido",
-        prompt = "Conta de 1 a 10 e explica brevemente como o teu modelo optimiza o raciocínio.",
+        title = "Sugestão rápida",
+        prompt = "Dá-me uma ideia ou sugestão aleatória útil para o que estou a fazer agora.",
         icon = Icons.Default.Speed
-    ),
-    QuickPrompt(
-        title = "Resumo Criativo",
-        prompt = "Explica o funcionamento de Large Language Models locais de forma clara e concisa.",
-        icon = Icons.Default.AutoAwesome
     )
 )
 

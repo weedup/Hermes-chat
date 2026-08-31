@@ -534,83 +534,11 @@ fun SettingsScreen(
                 }
             }
 
-            // Section 3: Cleartext HTTP & Android Security
+            // Section 2: Model & LLM Parameters
             SettingsSectionCard(
-                title = "Segurança de Rede Android",
-                icon = Icons.Default.Security
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(GoldContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = GoldPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(10.dp))
-
-                    Column {
-                        Text(
-                            text = "usesCleartextTraffic = true",
-                            fontWeight = FontWeight.Bold,
-                            color = GoldAccent,
-                            fontSize = 13.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Text(
-                            text = "Permite pedidos HTTP não encriptados para a porta local 9119 no Termux sem ser bloqueado pelo Android.",
-                            color = TextSecondary,
-                            fontSize = 11.5.sp
-                        )
-                    }
-                }
-            }
-
-            // Section 3: Model & LLM Parameters
-            SettingsSectionCard(
-                title = "Parâmetros do Modelo Hermes",
+                title = "Parâmetros do Modelo",
                 icon = Icons.Default.Speed
             ) {
-                Text(
-                    text = "Identificador do Modelo:",
-                    fontSize = 13.sp,
-                    color = TextSecondary
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                OutlinedTextField(
-                    value = modelInput,
-                    onValueChange = {
-                        modelInput = it
-                        viewModel.updateModelName(it)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = NavySurface,
-                        unfocusedContainerColor = NavySurface,
-                        focusedBorderColor = GoldPrimary,
-                        unfocusedBorderColor = NavyBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
-                    ),
-                    singleLine = true
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
                 // Temperature Slider
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -671,140 +599,14 @@ fun SettingsScreen(
                         inactiveTrackColor = NavySurfaceVariant
                     )
                 )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // System Prompt
-                Text(
-                    text = "Prompt de Sistema:",
-                    fontSize = 13.sp,
-                    color = TextSecondary
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                OutlinedTextField(
-                    value = promptInput,
-                    onValueChange = {
-                        promptInput = it
-                        viewModel.updateSystemPrompt(it)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = NavySurface,
-                        unfocusedContainerColor = NavySurface,
-                        focusedBorderColor = GoldPrimary,
-                        unfocusedBorderColor = NavyBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
-                    ),
-                    maxLines = 4
-                )
             }
 
-            // Section 4: Galaxy S26 Ultra & Tactile UX
-            SettingsSectionCard(
-                title = "Otimizações Galaxy S26 Ultra",
-                icon = Icons.Default.DisplaySettings
-            ) {
-                // Haptic Feedback Switch
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Vibration,
-                            contentDescription = null,
-                            tint = GoldAccent,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Feedback Tátil de Precisão",
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary,
-                                fontSize = 13.5.sp
-                            )
-                            Text(
-                                text = "Vibrações hápticas táteis ao digitar, enviar e receber respostas",
-                                color = TextSecondary,
-                                fontSize = 11.5.sp
-                            )
-                        }
-                    }
-
-                    Switch(
-                        checked = settings.hapticEnabled,
-                        onCheckedChange = { viewModel.updateHapticEnabled(it) },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = NavyDeep,
-                            checkedTrackColor = GoldPrimary,
-                            uncheckedThumbColor = TextTertiary,
-                            uncheckedTrackColor = NavySurfaceVariant
-                        )
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // S Pen Optimization Switch
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Draw,
-                            contentDescription = null,
-                            tint = GoldAccent,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Suporte a Entrada por S Pen",
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary,
-                                fontSize = 13.5.sp
-                            )
-                            Text(
-                                text = "Deteção de stylus, efeito hover e caligrafia no ecrã do S26 Ultra",
-                                color = TextSecondary,
-                                fontSize = 11.5.sp
-                            )
-                        }
-                    }
-
-                    Switch(
-                        checked = settings.sPenModeEnabled,
-                        onCheckedChange = { viewModel.updateSPenModeEnabled(it) },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = NavyDeep,
-                            checkedTrackColor = GoldPrimary,
-                            uncheckedThumbColor = TextTertiary,
-                            uncheckedTrackColor = NavySurfaceVariant
-                        )
-                    )
-                }
-            }
-
-            // Section 5: Reset Actions
+            // Section 3: Reset Actions
             OutlinedButton(
                 onClick = {
                     viewModel.resetToDefaults()
-                    urlInput = "http://127.0.0.1:9119/"
-                    modelInput = "hermes-3"
+                    urlInput = "http://127.0.0.1:9120/"
+                    modelInput = "hermes-agent"
                     promptInput = "Tu és o Hermes, um modelo de inteligência artificial de elite a correr localmente no dispositivo via Termux."
                 },
                 modifier = Modifier.fillMaxWidth(),
