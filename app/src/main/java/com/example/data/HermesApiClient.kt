@@ -51,9 +51,9 @@ class HermesApiClient {
             json(jsonConfig)
         }
         install(HttpTimeout) {
-            requestTimeoutMillis = 60_000
+            requestTimeoutMillis = 300_000
             connectTimeoutMillis = 8_000
-            socketTimeoutMillis = 60_000
+            socketTimeoutMillis = 300_000
         }
         install(Logging) {
             level = LogLevel.INFO
@@ -133,7 +133,7 @@ class HermesApiClient {
                 e.message?.contains("Failed to connect", ignoreCase = true) == true ||
                 e.message?.contains("Connection refused", ignoreCase = true) == true ||
                 e.message?.contains("ECONNREFUSED", ignoreCase = true) == true ->
-                    "Servidor offline em $normalized. Inicie o script no Termux na porta 9119."
+                    "Servidor offline em $normalized. Corre a ponte: python3 scripts/hermes_chat_bridge.py (porta 9120)."
                 e.message?.contains("CLEARTEXT", ignoreCase = true) == true ->
                     "Tráfego HTTP sem encriptação bloqueado pelo Android. (usesCleartextTraffic ativo)"
                 e.message?.contains("timeout", ignoreCase = true) == true ->
@@ -181,7 +181,7 @@ class HermesApiClient {
         }
         messagesList.add(OpenAiMessage(role = "user", content = userPrompt))
 
-        val modelEffective = model.ifBlank { "hermes-3" }
+        val modelEffective = model.ifBlank { "hermes-agent" }
 
         // Build full context prompt for non-OpenAI endpoints
         val fullPromptBuilder = StringBuilder()
@@ -306,7 +306,7 @@ class HermesApiClient {
                     if (e.message?.contains("Connection refused", ignoreCase = true) == true ||
                         e.message?.contains("Failed to connect", ignoreCase = true) == true) {
                         return@withContext Result.failure(
-                            Exception("Servidor offline em $baseUrl. Inicia o script Hermes no Termux na porta 9119.")
+                            Exception("Servidor offline em $baseUrl. Corre a ponte: python3 scripts/hermes_chat_bridge.py (porta 9120).")
                         )
                     }
                 }
@@ -388,7 +388,7 @@ class HermesApiClient {
             try {
                 val pingBody = buildJsonObject {
                     put("prompt", "ping")
-                    put("model", "hermes-3")
+                    put("model", "hermes-agent")
                     put("message", "ping")
                     put("text", "ping")
                     putJsonArray("messages") {
@@ -541,6 +541,6 @@ class HermesApiClient {
         } catch (e: Exception) {
             Log.w("HermesApiClient", "Could not fetch models list: ${e.message}")
         }
-        return@withContext listOf("hermes-3-llama-3.1-8b", "hermes-3", "nous-hermes-2", "hermes-local")
+        return@withContext listOf("hermes-agent", "hermes-3")
     }
 }

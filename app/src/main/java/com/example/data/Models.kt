@@ -37,9 +37,9 @@ data class ServerHealth(
 )
 
 data class HermesSettings(
-    val serverUrl: String = "http://127.0.0.1:9119/",
+    val serverUrl: String = "http://127.0.0.1:9120/",
     val customEndpoint: String = "AUTO",
-    val modelName: String = "hermes-3",
+    val modelName: String = "hermes-agent",
     val systemPrompt: String = "Tu és o Hermes, um assistente de IA avançado e prestável a correr localmente no Termux.",
     val temperature: Float = 0.7f,
     val maxTokens: Int = 2048,

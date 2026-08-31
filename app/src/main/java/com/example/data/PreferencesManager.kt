@@ -24,9 +24,9 @@ class PreferencesManager(private val context: Context) {
         val KEY_HAPTIC_ENABLED = booleanPreferencesKey("haptic_enabled")
         val KEY_SPEN_MODE = booleanPreferencesKey("spen_mode_enabled")
 
-        const val DEFAULT_SERVER_URL = "http://127.0.0.1:9119/"
+        const val DEFAULT_SERVER_URL = "http://127.0.0.1:9120/"
         const val DEFAULT_CUSTOM_ENDPOINT = "AUTO"
-        const val DEFAULT_MODEL = "hermes-3"
+        const val DEFAULT_MODEL = "hermes-agent"
         const val DEFAULT_SYSTEM_PROMPT = "Tu és o Hermes, um modelo de inteligência artificial de elite a correr localmente no dispositivo via Termux."
         const val DEFAULT_TEMPERATURE = 0.7f
         const val DEFAULT_MAX_TOKENS = 2048

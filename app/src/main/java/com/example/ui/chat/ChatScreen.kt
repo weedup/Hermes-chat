@@ -384,7 +384,7 @@ fun ChatTopBar(
                         )
 
                         Text(
-                            text = if (isOnline) "TERMUX LOCALHOST: 9119" else "TERMUX OFFLINE",
+                            text = if (isOnline) "TERMUX LOCALHOST: 9120" else "TERMUX OFFLINE",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Medium,
                             letterSpacing = 0.8.sp,
