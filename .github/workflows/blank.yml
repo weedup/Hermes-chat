@@ -31,23 +31,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: (Optional) Decode keystore from secret
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
-        run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > release.keystore
-
-      - name: Build release APK
+      - name: Build Debug APK (no signing, for testing)
         run: |
           # adjust module name if your app module isn't `app`
-          if [ -f release.keystore ]; then
-            ./gradlew clean :app:assembleRelease \
-              -Pandroid.injected.signing.store.file=release.keystore \
-              -Pandroid.injected.signing.store.password="${{ secrets.KEYSTORE_PASSWORD }}" \
-              -Pandroid.injected.signing.key.alias="${{ secrets.KEY_ALIAS }}" \
-              -Pandroid.injected.signing.key.password="${{ secrets.KEY_PASSWORD }}"
-          else
-            ./gradlew clean :app:assembleRelease
-          fi
+          ./gradlew clean :app:assembleDebug
         timeout-minutes: 30
 
       - name: Upload APK artifact
