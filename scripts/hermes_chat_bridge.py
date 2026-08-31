@@ -39,6 +39,54 @@ def load_key():
 KEY = load_key()
 
 
+def resolve_profile_info():
+    """Devolve {name, profile, aliases} do perfil Hermes ativo.
+
+    Lê $HERMES_HOME (default ~/.hermes). O nome "amigável" do agente é tirado do
+    SOUL.md (primeira linha 'You are <Nome>'), com fallback para o nome do
+    perfil activo. Mapeia 'default' -> 'Agent T' se o SOUL.md não disser nada.
+    """
+    home = os.environ.get("HERMES_HOME") or os.path.expanduser("~/.hermes")
+    profile = os.path.basename(home.rstrip("/")) or "default"
+    if profile in (".hermes", "hermes"):
+        profile = "default"
+
+    # name do SOUL.md
+    friendly = ""
+    for soul_path in (os.path.join(home, "SOUL.md"),):
+        try:
+            with open(soul_path) as fh:
+                for line in fh:
+                    stripped = line.strip()
+                    if stripped.lower().startswith("you are "):
+                        friendly = stripped[len("you are "):].strip()
+                        break
+                    if stripped.startswith("# "):
+                        friendly = stripped[2:].strip()
+                        break
+        except OSError:
+            continue
+
+    if not friendly:
+        friendly = profile if profile != "default" else "Agent T"
+
+    # alias a partir do config custom_providers (ex.: 'name: Agent T')
+    alias = friendly
+    try:
+        import yaml
+        with open(os.path.join(home, "config.yaml")) as fh:
+            cfg = yaml.safe_load(fh)
+        cps = cfg.get("custom_providers", [])
+        if isinstance(cps, list) and cps:
+            first = cps[0]
+            if isinstance(first, dict) and first.get("name"):
+                alias = str(first["name"])
+    except Exception:
+        pass
+
+    return {"name": friendly, "profile": profile, "alias": alias}
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -78,6 +126,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path in ("/", ""):
             payload = b'{"status":"ok","proxy":"hermes-chat-bridge"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        if self.path.rstrip("/") == "/profile":
+            import json
+            info = resolve_profile_info()
+            payload = json.dumps(info, ensure_ascii=False).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))

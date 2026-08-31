@@ -53,8 +53,36 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _isSPenHovering = MutableStateFlow(false)
     val isSPenHovering: StateFlow<Boolean> = _isSPenHovering.asStateFlow()
 
+    private val _agentName = MutableStateFlow<String?>(null)
+    val agentName: StateFlow<String?> = _agentName.asStateFlow()
+
+    private val _pendingQueue = MutableStateFlow<List<String>>(emptyList())
+    private val _pendingCount = MutableStateFlow(0)
+    val pendingCount: StateFlow<Int> = _pendingCount.asStateFlow()
+
     init {
         checkServerHealth()
+        refreshAgentName()
+        // Consome a fila de mensagens pendentes à medida que a geração termina
+        viewModelScope.launch {
+            _isGenerating.collect { generating ->
+                if (!generating && _pendingQueue.value.isNotEmpty()) {
+                    val next = _pendingQueue.value.first()
+                    _pendingQueue.value = _pendingQueue.value.drop(1)
+                    _pendingCount.value = _pendingQueue.value.size
+                    doSend(next)
+                }
+            }
+        }
+    }
+
+    fun refreshAgentName() {
+        viewModelScope.launch {
+            val name = apiClient.fetchProfile(settings.value.serverUrl)
+            if (!name.isNullOrBlank()) {
+                _agentName.value = name
+            }
+        }
     }
 
     fun onInputChanged(text: String) {
@@ -83,9 +111,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun sendMessage(overrideText: String? = null) {
         val textToSend = (overrideText ?: _inputText.value).trim()
-        if (textToSend.isBlank() || _isGenerating.value) return
+        if (textToSend.isBlank()) return
+
+        // Se já está a gerar, mete em fila (permite enviar durante o "a pensar")
+        if (_isGenerating.value) {
+            _pendingQueue.value = _pendingQueue.value + textToSend
+            _pendingCount.value = _pendingQueue.value.size
+            _inputText.value = ""
+            if (settings.value.hapticEnabled) {
+                hapticHelper.trigger(HapticHelper.HapticType.LIGHT_TICK)
+            }
+            return
+        }
 
         _inputText.value = ""
+        doSend(textToSend)
+    }
+
+    private fun doSend(textToSend: String) {
         val userMsgId = UUID.randomUUID().toString()
         val userMsg = ChatMessage(
             id = userMsgId,

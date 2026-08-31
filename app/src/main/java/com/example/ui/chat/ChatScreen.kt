@@ -5,6 +5,11 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -25,6 +30,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -138,6 +144,8 @@ fun ChatScreen(
     val serverHealth by viewModel.serverHealth.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val isSPenHovering by viewModel.isSPenHovering.collectAsState()
+    val agentName by viewModel.agentName.collectAsState()
+    val pendingCount by viewModel.pendingCount.collectAsState()
 
     val listState = rememberLazyListState()
     var showClearDialog by remember { mutableStateOf(false) }
@@ -166,6 +174,7 @@ fun ChatScreen(
             ChatTopBar(
                 serverUrl = settings.serverUrl,
                 modelName = settings.modelName,
+                agentName = agentName,
                 serverHealth = serverHealth,
                 onStatusClick = onOpenDiagnostics,
                 onRefreshClick = {
@@ -272,10 +281,24 @@ fun ChatScreen(
                 )
             }
 
+            // "A pensar..." indicator + fila de mensagens em espera
+            AnimatedVisibility(
+                visible = isGenerating || pendingCount > 0,
+                enter = fadeIn() + slideInVertically(),
+                exit = fadeOut()
+            ) {
+                ThinkingBar(
+                    isGenerating = isGenerating,
+                    agentName = agentName,
+                    pendingCount = pendingCount
+                )
+            }
+
             // Input Bar optimized for Galaxy S26 Ultra & S Pen
             ChatInputBar(
                 inputText = inputText,
                 isGenerating = isGenerating,
+                pendingCount = pendingCount,
                 isSPenHovering = isSPenHovering,
                 hapticEnabled = settings.hapticEnabled,
                 sPenEnabled = settings.sPenModeEnabled,
@@ -318,6 +341,7 @@ fun ChatScreen(
 fun ChatTopBar(
     serverUrl: String,
     modelName: String,
+    agentName: String?,
     serverHealth: com.example.data.ServerHealth?,
     onStatusClick: () -> Unit,
     onRefreshClick: () -> Unit,
@@ -365,7 +389,7 @@ fun ChatTopBar(
 
                 Column {
                     Text(
-                        text = "Hermes Chat",
+                        text = agentName ?: "Hermes Chat",
                         fontWeight = FontWeight.Bold,
                         fontSize = 17.sp,
                         color = TextPrimary,
@@ -831,9 +855,60 @@ fun EmptyChatState(
 }
 
 @Composable
+fun ThinkingBar(
+    isGenerating: Boolean,
+    agentName: String?,
+    pendingCount: Int,
+    modifier: Modifier = Modifier
+) {
+    val transition = rememberInfiniteTransition(label = "thinking")
+    val alpha by transition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(500),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "thinking_alpha"
+    )
+
+    Surface(
+        color = NavyDeep,
+        modifier = modifier
+            .fillMaxWidth()
+            .border(BorderStroke(1.dp, NavyBorderSubtle))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                color = GoldPrimary,
+                strokeWidth = 2.dp
+            )
+            Text(
+                text = when {
+                    isGenerating -> "${agentName ?: "Hermes"} está a pensar…"
+                    pendingCount > 0 -> "$pendingCount mensage${if (pendingCount == 1) "m" else "ns"} em espera"
+                    else -> ""
+                },
+                color = TextSecondary.copy(alpha = alpha),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
 fun ChatInputBar(
     inputText: String,
     isGenerating: Boolean,
+    pendingCount: Int,
     isSPenHovering: Boolean,
     hapticEnabled: Boolean,
     sPenEnabled: Boolean,
@@ -952,7 +1027,7 @@ fun ChatInputBar(
                     ),
                     keyboardActions = KeyboardActions(
                         onSend = {
-                            if (inputText.isNotBlank() && !isGenerating) {
+                            if (inputText.isNotBlank()) {
                                 onSend()
                             }
                         }
@@ -974,32 +1049,40 @@ fun ChatInputBar(
                         )
                         .clip(CircleShape)
                         .background(
-                            if (isGenerating) StatusOffline else if (inputText.isNotBlank()) GoldPrimary else NavySurfaceVariant
+                            if (inputText.isNotBlank()) GoldPrimary else NavySurfaceVariant
                         )
-                        .clickable(enabled = (inputText.isNotBlank() || isGenerating)) {
+                        .clickable(enabled = inputText.isNotBlank()) {
                             hapticHelper.trigger(HapticHelper.HapticType.HEAVY_CLICK, hapticEnabled)
-                            if (!isGenerating && inputText.isNotBlank()) {
-                                onSend()
-                            }
+                            onSend()
                         }
                         .testTag("send_message_button"),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (isGenerating) {
-                        Icon(
-                            imageVector = Icons.Default.Stop,
-                            contentDescription = "A Gerar...",
-                            tint = TextPrimary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Enviar Mensagem",
-                            tint = if (inputText.isNotBlank()) NavyDeep else TextTertiary,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    if (pendingCount > 0) {
+                        // Badge com o número de mensagens em fila
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 2.dp, y = (-2).dp)
+                                .size(18.dp)
+                                .clip(CircleShape)
+                                .background(GoldPrimary),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${if (pendingCount > 9) "9+" else pendingCount}",
+                                color = NavyDeep,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 10.sp
+                            )
+                        }
                     }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = if (isGenerating) "Enviar (fica em fila)" else "Enviar Mensagem",
+                        tint = if (inputText.isNotBlank()) NavyDeep else TextTertiary,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
 

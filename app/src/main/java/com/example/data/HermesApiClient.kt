@@ -160,6 +160,38 @@ class HermesApiClient {
      */
     var onStreamChunk: ((String) -> Unit)? = null
 
+    /**
+     * Devolve o nome do perfil/agente Hermes ativo, lendo o endpoint /profile da
+     * ponte (que faz a resolução para "Agent T" / "Tara" / etc.). Fallback: null.
+     */
+    suspend fun fetchProfile(baseUrl: String): String? = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl).removeSuffix("/")
+        val candidates = listOf("/profile", "/api/profile", "/v1/profile")
+        for (path in candidates) {
+            try {
+                val response: HttpResponse = client.get("$normalized$path") {
+                    timeout {
+                        requestTimeoutMillis = 3_000
+                        connectTimeoutMillis = 3_000
+                        socketTimeoutMillis = 3_000
+                    }
+                }
+                if (response.status.isSuccess()) {
+                    val text = response.bodyAsText()
+                    val element = jsonConfig.parseToJsonElement(text)
+                    if (element is JsonObject) {
+                        val name = element["alias"]?.jsonPrimitive?.contentOrNull
+                            ?: element["name"]?.jsonPrimitive?.contentOrNull
+                        if (!name.isNullOrBlank()) return@withContext name
+                    }
+                }
+            } catch (_: Exception) {
+                // tenta o próximo endpoint
+            }
+        }
+        return@withContext null
+    }
+
     suspend fun sendMessage(
         baseUrl: String,
         history: List<ChatMessage>,
