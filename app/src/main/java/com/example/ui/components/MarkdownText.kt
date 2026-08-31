@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
@@ -62,27 +63,29 @@ fun MarkdownMessageView(
 ) {
     val blocks = remember(text) { parseMarkdownBlocks(text) }
 
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        blocks.forEach { block ->
-            when (block) {
-                is MarkdownBlock.CodeBlock -> {
-                    CodeBlockCard(language = block.language, code = block.code)
-                }
-                is MarkdownBlock.Paragraph -> {
-                    FormattedParagraph(content = block.text, textColor = textColor)
-                }
-                is MarkdownBlock.BulletItem -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Text(
-                            text = "• ",
-                            color = GoldPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
-                        )
+    SelectionContainer {
+        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            blocks.forEach { block ->
+                when (block) {
+                    is MarkdownBlock.CodeBlock -> {
+                        CodeBlockCard(language = block.language, code = block.code)
+                    }
+                    is MarkdownBlock.Paragraph -> {
                         FormattedParagraph(content = block.text, textColor = textColor)
+                    }
+                    is MarkdownBlock.BulletItem -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Text(
+                                text = "• ",
+                                color = GoldPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                            FormattedParagraph(content = block.text, textColor = textColor)
+                        }
                     }
                 }
             }

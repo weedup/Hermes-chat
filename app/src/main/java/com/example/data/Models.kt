@@ -38,12 +38,22 @@ data class ServerHealth(
 
 data class HermesSettings(
     val serverUrl: String = "http://127.0.0.1:9119/",
+    val customEndpoint: String = "AUTO",
     val modelName: String = "hermes-3",
     val systemPrompt: String = "Tu és o Hermes, um assistente de IA avançado e prestável a correr localmente no Termux.",
     val temperature: Float = 0.7f,
     val maxTokens: Int = 2048,
     val hapticEnabled: Boolean = true,
     val sPenModeEnabled: Boolean = true
+)
+
+data class EndpointProbeResult(
+    val path: String,
+    val method: String,
+    val statusCode: Int,
+    val isSuccess: Boolean,
+    val message: String,
+    val latencyMs: Long
 )
 
 // OpenAI / Hermes Compatible DTOs

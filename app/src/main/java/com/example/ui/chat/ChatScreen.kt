@@ -251,7 +251,8 @@ fun ChatScreen(
                                 hapticHelper = viewModel.hapticHelper,
                                 hapticEnabled = settings.hapticEnabled,
                                 onRetry = { viewModel.retryMessage(message.id) },
-                                onDelete = { viewModel.deleteMessage(message.id) }
+                                onDelete = { viewModel.deleteMessage(message.id) },
+                                onOpenSettings = onNavigateToSettings
                             )
                         }
                     }
@@ -464,6 +465,7 @@ fun MessageBubble(
     hapticEnabled: Boolean,
     onRetry: () -> Unit,
     onDelete: () -> Unit,
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -480,7 +482,7 @@ fun MessageBubble(
     ) {
         Box(
             modifier = Modifier
-                .fillMaxWidth(0.85f)
+                .fillMaxWidth(0.88f)
                 .shadow(
                     elevation = if (isUser) 4.dp else 2.dp,
                     shape = RoundedCornerShape(
@@ -564,37 +566,53 @@ fun MessageBubble(
                                 )
                             }
 
-                            Text(
-                                text = message.text,
-                                color = TextSecondary,
-                                fontSize = 13.sp
-                            )
+                            androidx.compose.foundation.text.selection.SelectionContainer {
+                                Text(
+                                    text = message.text,
+                                    color = TextSecondary,
+                                    fontSize = 13.sp
+                                )
+                            }
 
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(top = 4.dp),
-                                horizontalArrangement = Arrangement.End
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
+                                TextButton(
+                                    onClick = onOpenSettings,
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Icon(Icons.Default.Settings, null, tint = GoldAccent, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Configurar Rota", color = GoldAccent, fontSize = 12.sp)
+                                }
+
+                                Spacer(modifier = Modifier.width(4.dp))
+
                                 TextButton(
                                     onClick = onRetry,
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                                 ) {
-                                    Icon(Icons.Default.Refresh, null, tint = GoldAccent, modifier = Modifier.size(14.dp))
+                                    Icon(Icons.Default.Refresh, null, tint = GoldPrimary, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Tentar Novamente", color = GoldAccent, fontSize = 12.sp)
+                                    Text("Tentar Novamente", color = GoldPrimary, fontSize = 12.sp)
                                 }
                             }
                         }
                     } else {
                         if (isUser) {
-                            Text(
-                                text = message.text,
-                                color = UserBubbleText,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                lineHeight = 20.sp
-                            )
+                            androidx.compose.foundation.text.selection.SelectionContainer {
+                                Text(
+                                    text = message.text,
+                                    color = UserBubbleText,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    lineHeight = 20.sp
+                                )
+                            }
                         } else {
                             MarkdownMessageView(
                                 text = message.text,
@@ -606,7 +624,7 @@ fun MessageBubble(
             }
         }
 
-        // Subtitle / Timestamp with Sleek metadata
+        // Subtitle / Timestamp with metadata and copy action
         Row(
             modifier = Modifier.padding(top = 4.dp, start = 4.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -638,22 +656,34 @@ fun MessageBubble(
                 )
             }
 
-            // Quick copy icon
+            // Quick copy action with comfortable touch target
             if (message.status == MessageStatus.SENT) {
-                Spacer(modifier = Modifier.width(2.dp))
-                Icon(
-                    imageVector = Icons.Default.ContentCopy,
-                    contentDescription = "Copiar",
-                    tint = TextTertiary,
+                Spacer(modifier = Modifier.width(4.dp))
+                Row(
                     modifier = Modifier
-                        .size(11.dp)
+                        .clip(RoundedCornerShape(4.dp))
                         .clickable {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             clipboard.setPrimaryClip(ClipData.newPlainText("Hermes Message", message.text))
                             hapticHelper.trigger(HapticHelper.HapticType.LIGHT_TICK, hapticEnabled)
-                            Toast.makeText(context, "Mensagem copiada", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Texto copiado para a área de transferência", Toast.LENGTH_SHORT).show()
                         }
-                )
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copiar Mensagem",
+                        tint = GoldAccent.copy(alpha = 0.8f),
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = "Copiar",
+                        color = GoldAccent.copy(alpha = 0.8f),
+                        fontSize = 10.5.sp
+                    )
+                }
             }
         }
     }

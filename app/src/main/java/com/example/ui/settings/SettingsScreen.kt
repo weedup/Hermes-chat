@@ -99,8 +99,11 @@ fun SettingsScreen(
     val isTesting by viewModel.isTestingConnection.collectAsState()
     val testResult by viewModel.testResult.collectAsState()
     val availableModels by viewModel.availableModels.collectAsState()
+    val isProbing by viewModel.isProbingEndpoints.collectAsState()
+    val endpointProbes by viewModel.endpointProbes.collectAsState()
 
     var urlInput by remember(settings.serverUrl) { mutableStateOf(settings.serverUrl) }
+    var endpointInput by remember(settings.customEndpoint) { mutableStateOf(settings.customEndpoint) }
     var modelInput by remember(settings.modelName) { mutableStateOf(settings.modelName) }
     var promptInput by remember(settings.systemPrompt) { mutableStateOf(settings.systemPrompt) }
 
@@ -323,7 +326,215 @@ fun SettingsScreen(
                 }
             }
 
-            // Section 2: Cleartext HTTP & Android Security
+            // Section 2: Endpoint Route & Auto-Detection
+            SettingsSectionCard(
+                title = "Rota da API & Endpoints do Hermes",
+                icon = Icons.Default.Terminal
+            ) {
+                Text(
+                    text = "Endpoint / Rota do Servidor Termux:",
+                    fontSize = 13.sp,
+                    color = TextSecondary
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                OutlinedTextField(
+                    value = endpointInput,
+                    onValueChange = {
+                        endpointInput = it
+                        viewModel.updateCustomEndpoint(it)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = NavySurface,
+                        unfocusedContainerColor = NavySurface,
+                        focusedBorderColor = GoldPrimary,
+                        unfocusedBorderColor = NavyBorder,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary
+                    ),
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 14.sp
+                    ),
+                    placeholder = {
+                        Text("AUTO ou /v1/chat/completions ou /chat", color = TextTertiary, fontSize = 12.5.sp)
+                    },
+                    singleLine = true
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "Rotas Comuns de Servidores:",
+                    fontSize = 12.sp,
+                    color = TextTertiary
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    QuickUrlChip(
+                        label = "AUTO (Auto-Detectar)",
+                        url = "AUTO",
+                        isSelected = endpointInput.equals("AUTO", ignoreCase = true),
+                        onClick = {
+                            endpointInput = "AUTO"
+                            viewModel.updateCustomEndpoint("AUTO")
+                        }
+                    )
+
+                    QuickUrlChip(
+                        label = "/chat",
+                        url = "/chat",
+                        isSelected = endpointInput == "/chat",
+                        onClick = {
+                            endpointInput = "/chat"
+                            viewModel.updateCustomEndpoint("/chat")
+                        }
+                    )
+
+                    QuickUrlChip(
+                        label = "/generate",
+                        url = "/generate",
+                        isSelected = endpointInput == "/generate",
+                        onClick = {
+                            endpointInput = "/generate"
+                            viewModel.updateCustomEndpoint("/generate")
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    QuickUrlChip(
+                        label = "/v1/chat/completions",
+                        url = "/v1/chat/completions",
+                        isSelected = endpointInput == "/v1/chat/completions",
+                        onClick = {
+                            endpointInput = "/v1/chat/completions"
+                            viewModel.updateCustomEndpoint("/v1/chat/completions")
+                        }
+                    )
+
+                    QuickUrlChip(
+                        label = "/api/chat",
+                        url = "/api/chat",
+                        isSelected = endpointInput == "/api/chat",
+                        onClick = {
+                            endpointInput = "/api/chat"
+                            viewModel.updateCustomEndpoint("/api/chat")
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Endpoint Diagnostic Scan Button
+                OutlinedButton(
+                    onClick = {
+                        viewModel.probeServerEndpoints()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, GoldPrimary),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldPrimary),
+                    enabled = !isProbing
+                ) {
+                    if (isProbing) {
+                        CircularProgressIndicator(
+                            color = GoldPrimary,
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("A Sondar Endpoints no Servidor...", fontSize = 13.sp)
+                    } else {
+                        Icon(Icons.Default.Terminal, null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Diagnosticar Rotas do Servidor (Scan)", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+
+                // Show Probed Endpoints
+                if (endpointProbes.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Resultados da Verificação de Rotas:",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        endpointProbes.forEach { probe ->
+                            val isOk = probe.statusCode == 200 || probe.isSuccess
+                            val is405 = probe.statusCode == 405
+                            Surface(
+                                color = NavySurface,
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isOk) StatusOnline.copy(alpha = 0.6f) else if (is405) StatusWarning.copy(alpha = 0.5f) else NavyBorder
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = "${probe.method} ${probe.path.ifBlank { "/" }}",
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isOk) StatusOnline else if (is405) StatusWarning else TextPrimary
+                                            )
+                                        }
+                                        Text(
+                                            text = "${probe.message} • ${probe.latencyMs}ms",
+                                            fontSize = 11.sp,
+                                            color = TextSecondary
+                                        )
+                                    }
+
+                                    if (isOk || probe.statusCode == 422) {
+                                        Button(
+                                            onClick = {
+                                                val path = probe.path.ifBlank { "/" }
+                                                endpointInput = path
+                                                viewModel.updateCustomEndpoint(path)
+                                            },
+                                            shape = RoundedCornerShape(6.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = NavyDeep)
+                                        ) {
+                                            Text("Ativar Rota", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Section 3: Cleartext HTTP & Android Security
             SettingsSectionCard(
                 title = "Segurança de Rede Android",
                 icon = Icons.Default.Security

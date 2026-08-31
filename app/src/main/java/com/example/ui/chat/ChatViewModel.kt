@@ -137,7 +137,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 model = currentSettings.modelName,
                 systemPrompt = currentSettings.systemPrompt,
                 temperature = currentSettings.temperature,
-                maxTokens = currentSettings.maxTokens
+                maxTokens = currentSettings.maxTokens,
+                customEndpoint = currentSettings.customEndpoint
             )
 
             _isGenerating.value = false

@@ -16,6 +16,7 @@ class PreferencesManager(private val context: Context) {
 
     companion object {
         val KEY_SERVER_URL = stringPreferencesKey("server_url")
+        val KEY_CUSTOM_ENDPOINT = stringPreferencesKey("custom_endpoint")
         val KEY_MODEL_NAME = stringPreferencesKey("model_name")
         val KEY_SYSTEM_PROMPT = stringPreferencesKey("system_prompt")
         val KEY_TEMPERATURE = floatPreferencesKey("temperature")
@@ -24,6 +25,7 @@ class PreferencesManager(private val context: Context) {
         val KEY_SPEN_MODE = booleanPreferencesKey("spen_mode_enabled")
 
         const val DEFAULT_SERVER_URL = "http://127.0.0.1:9119/"
+        const val DEFAULT_CUSTOM_ENDPOINT = "AUTO"
         const val DEFAULT_MODEL = "hermes-3"
         const val DEFAULT_SYSTEM_PROMPT = "Tu és o Hermes, um modelo de inteligência artificial de elite a correr localmente no dispositivo via Termux."
         const val DEFAULT_TEMPERATURE = 0.7f
@@ -33,6 +35,7 @@ class PreferencesManager(private val context: Context) {
     val settingsFlow: Flow<HermesSettings> = context.dataStore.data.map { preferences ->
         HermesSettings(
             serverUrl = preferences[KEY_SERVER_URL] ?: DEFAULT_SERVER_URL,
+            customEndpoint = preferences[KEY_CUSTOM_ENDPOINT] ?: DEFAULT_CUSTOM_ENDPOINT,
             modelName = preferences[KEY_MODEL_NAME] ?: DEFAULT_MODEL,
             systemPrompt = preferences[KEY_SYSTEM_PROMPT] ?: DEFAULT_SYSTEM_PROMPT,
             temperature = preferences[KEY_TEMPERATURE] ?: DEFAULT_TEMPERATURE,
@@ -45,6 +48,12 @@ class PreferencesManager(private val context: Context) {
     suspend fun updateServerUrl(url: String) {
         context.dataStore.edit { preferences ->
             preferences[KEY_SERVER_URL] = url.trim()
+        }
+    }
+
+    suspend fun updateCustomEndpoint(endpoint: String) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_CUSTOM_ENDPOINT] = endpoint.trim()
         }
     }
 

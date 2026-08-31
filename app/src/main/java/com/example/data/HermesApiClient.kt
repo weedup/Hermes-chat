@@ -18,6 +18,7 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
@@ -25,10 +26,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 
 class HermesApiClient {
 
@@ -153,18 +159,19 @@ class HermesApiClient {
         model: String,
         systemPrompt: String,
         temperature: Float,
-        maxTokens: Int
+        maxTokens: Int,
+        customEndpoint: String = "AUTO"
     ): Result<Pair<String, Long>> = withContext(Dispatchers.IO) {
-        val normalized = normalizeUrl(baseUrl)
+        val normalized = normalizeUrl(baseUrl).removeSuffix("/")
         val startTime = System.currentTimeMillis()
 
+        // Prepare messages structure
         val messagesList = mutableListOf<OpenAiMessage>()
         if (systemPrompt.isNotBlank()) {
             messagesList.add(OpenAiMessage(role = "system", content = systemPrompt))
         }
 
-        // Add recent context (last 12 messages for performance)
-        val contextHistory = history.takeLast(12)
+        val contextHistory = history.takeLast(10)
         for (msg in contextHistory) {
             when (msg.sender) {
                 MessageSender.USER -> messagesList.add(OpenAiMessage(role = "user", content = msg.text))
@@ -174,90 +181,278 @@ class HermesApiClient {
         }
         messagesList.add(OpenAiMessage(role = "user", content = userPrompt))
 
-        val requestBody = OpenAiChatRequest(
-            model = model.ifBlank { "hermes-3" },
+        val modelEffective = model.ifBlank { "hermes-3" }
+
+        // Build full context prompt for non-OpenAI endpoints
+        val fullPromptBuilder = StringBuilder()
+        if (systemPrompt.isNotBlank()) {
+            fullPromptBuilder.append("<|im_start|>system\n$systemPrompt<|im_end|>\n")
+        }
+        for (m in messagesList) {
+            fullPromptBuilder.append("<|im_start|>${m.role}\n${m.content}<|im_end|>\n")
+        }
+        fullPromptBuilder.append("<|im_start|>assistant\n")
+        val fullPromptText = fullPromptBuilder.toString()
+
+        // JSON payload variants
+        val openAiPayload = OpenAiChatRequest(
+            model = modelEffective,
             messages = messagesList,
             temperature = temperature,
             maxTokens = maxTokens,
             stream = false
         )
 
-        // Try standard OpenAI endpoint: /v1/chat/completions
-        val endpoint = "${normalized.removeSuffix("/")}/v1/chat/completions"
+        // Simple dict payload for FastAPI / Flask / Python local scripts
+        val simpleDictPayload = buildJsonObject {
+            put("model", modelEffective)
+            put("prompt", fullPromptText)
+            put("user_prompt", userPrompt)
+            put("message", userPrompt)
+            put("text", userPrompt)
+            put("query", userPrompt)
+            put("input", userPrompt)
+            put("temperature", temperature)
+            put("max_tokens", maxTokens)
+            put("stream", false)
+            putJsonArray("messages") {
+                messagesList.forEach { m ->
+                    addJsonObject {
+                        put("role", m.role)
+                        put("content", m.content)
+                    }
+                }
+            }
+        }
 
-        try {
-            val response: HttpResponse = client.post(endpoint) {
-                contentType(ContentType.Application.Json)
-                setBody(requestBody)
+        // Determine list of endpoints to try
+        val endpointsToTry = mutableListOf<Pair<String, Boolean>>() // path, isOpenAiFormat
+
+        if (customEndpoint.isNotBlank() && !customEndpoint.equals("AUTO", ignoreCase = true)) {
+            val cleanPath = if (customEndpoint.startsWith("/")) customEndpoint else "/$customEndpoint"
+            endpointsToTry.add(Pair(cleanPath, cleanPath.contains("completion", ignoreCase = true)))
+        }
+
+        // Add standard endpoints in priority order
+        val standardEndpoints = listOf(
+            Pair("/v1/chat/completions", true),
+            Pair("/chat/completions", true),
+            Pair("/chat", false),
+            Pair("/api/chat", false),
+            Pair("/v1/chat", false),
+            Pair("/generate", false),
+            Pair("/api/generate", false),
+            Pair("/completion", false),
+            Pair("/completions", false),
+            Pair("/v1/completions", false),
+            Pair("/predict", false),
+            Pair("/prompt", false),
+            Pair("", false) // POST to root
+        )
+
+        for (ep in standardEndpoints) {
+            if (endpointsToTry.none { it.first.removeSuffix("/") == ep.first.removeSuffix("/") }) {
+                endpointsToTry.add(ep)
+            }
+        }
+
+        val errorsLog = mutableListOf<String>()
+
+        for ((path, preferOpenAi) in endpointsToTry) {
+            val fullUrl = if (path.isEmpty()) normalized else "$normalized${if (path.startsWith("/")) path else "/$path"}"
+            
+            // Try preferred payload first, then fallback payload on the same endpoint
+            val payloads = if (preferOpenAi) {
+                listOf(Pair("openai", openAiPayload), Pair("simple", simpleDictPayload))
+            } else {
+                listOf(Pair("simple", simpleDictPayload), Pair("openai", openAiPayload))
             }
 
-            val latency = System.currentTimeMillis() - startTime
-            val responseText = response.bodyAsText()
-
-            if (response.status.isSuccess()) {
+            for ((_, payload) in payloads) {
                 try {
-                    val parsed = jsonConfig.decodeFromString<OpenAiChatResponse>(responseText)
-                    val reply = parsed.choices.firstOrNull()?.message?.content
-                    if (!reply.isNullOrBlank()) {
-                        return@withContext Result.success(Pair(reply, latency))
-                    }
-                } catch (pe: Exception) {
-                    // Try loose JSON parsing in case format slightly varies
-                    try {
-                        val jsonElement = jsonConfig.parseToJsonElement(responseText).jsonObject
-                        val choices = jsonElement["choices"]?.jsonArray
-                        val text = choices?.firstOrNull()?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
-                            ?: jsonElement["response"]?.jsonPrimitive?.contentOrNull
-                            ?: jsonElement["text"]?.jsonPrimitive?.contentOrNull
-
-                        if (!text.isNullOrBlank()) {
-                            return@withContext Result.success(Pair(text, latency))
+                    val response: HttpResponse = client.post(fullUrl) {
+                        contentType(ContentType.Application.Json)
+                        if (payload is OpenAiChatRequest) {
+                            setBody(payload)
+                        } else if (payload is JsonObject) {
+                            setBody(payload)
                         }
-                    } catch (_: Exception) {
-                        // Fall back to plain text if not empty
+                    }
+
+                    val responseText = response.bodyAsText()
+                    val latency = System.currentTimeMillis() - startTime
+
+                    if (response.status.isSuccess()) {
+                        val extracted = extractContentFromResponse(responseText)
+                        if (!extracted.isNullOrBlank()) {
+                            Log.d("HermesApiClient", "Success with endpoint $fullUrl in ${latency}ms")
+                            return@withContext Result.success(Pair(extracted, latency))
+                        }
+                        if (responseText.isNotBlank()) {
+                            return@withContext Result.success(Pair(responseText, latency))
+                        }
+                    } else {
+                        errorsLog.add("$path -> HTTP ${response.status.value}")
+                        // If 405 Method Not Allowed or 404 Not Found, immediately try next endpoint
+                        if (response.status == HttpStatusCode.MethodNotAllowed ||
+                            response.status == HttpStatusCode.NotFound) {
+                            break // Try next endpoint in list
+                        }
+                    }
+                } catch (e: Exception) {
+                    errorsLog.add("$path -> ${e.message ?: "Connection error"}")
+                    Log.d("HermesApiClient", "Probe to $fullUrl failed: ${e.message}")
+                    // If connection refused on root, whole server is likely down
+                    if (e.message?.contains("Connection refused", ignoreCase = true) == true ||
+                        e.message?.contains("Failed to connect", ignoreCase = true) == true) {
+                        return@withContext Result.failure(
+                            Exception("Servidor offline em $baseUrl. Inicia o script Hermes no Termux na porta 9119.")
+                        )
+                    }
+                }
+            }
+        }
+
+        val lastErrorSummary = errorsLog.joinToString("; ")
+        val friendlyMessage = "Não foi possível obter resposta válida dos endpoints testados em $baseUrl.\nResumo das tentativas: $lastErrorSummary\n\nDica: Abre as Definições para testar ou selecionar a rota exata do teu script Termux."
+        return@withContext Result.failure(Exception(friendlyMessage))
+    }
+
+    private fun extractContentFromResponse(responseText: String): String? {
+        // Try strict OpenAiChatResponse
+        try {
+            val parsed = jsonConfig.decodeFromString<OpenAiChatResponse>(responseText)
+            val reply = parsed.choices.firstOrNull()?.message?.content
+            if (!reply.isNullOrBlank()) return reply
+        } catch (_: Exception) {
+        }
+
+        // Try loose JSON parsing
+        try {
+            val element = jsonConfig.parseToJsonElement(responseText)
+            if (element is JsonObject) {
+                // Check choices[0].message.content
+                element["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.let { choice ->
+                    val c = choice["message"]?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
+                        ?: choice["text"]?.jsonPrimitive?.contentOrNull
+                    if (!c.isNullOrBlank()) return c
+                }
+
+                // Check top-level standard fields
+                val directFields = listOf(
+                    "response", "reply", "output", "result", "text", "content", "message", "answer", "data"
+                )
+                for (field in directFields) {
+                    val fieldVal = element[field]
+                    if (fieldVal is JsonPrimitive) {
+                        val text = fieldVal.contentOrNull
+                        if (!text.isNullOrBlank()) return text
+                    } else if (fieldVal is JsonObject) {
+                        val text = fieldVal["content"]?.jsonPrimitive?.contentOrNull
+                            ?: fieldVal["text"]?.jsonPrimitive?.contentOrNull
+                        if (!text.isNullOrBlank()) return text
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+
+        // Fallback: if it's plain text without JSON markers, return trimmed text
+        if (!responseText.trim().startsWith("{") && !responseText.trim().startsWith("[")) {
+            return responseText.trim()
+        }
+
+        return null
+    }
+
+    suspend fun probeEndpoints(baseUrl: String): List<EndpointProbeResult> = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl).removeSuffix("/")
+        val results = mutableListOf<EndpointProbeResult>()
+
+        val candidatePaths = listOf(
+            Pair("/v1/chat/completions", "POST"),
+            Pair("/chat/completions", "POST"),
+            Pair("/chat", "POST"),
+            Pair("/api/chat", "POST"),
+            Pair("/generate", "POST"),
+            Pair("/api/generate", "POST"),
+            Pair("/v1/models", "GET"),
+            Pair("/models", "GET"),
+            Pair("/health", "GET"),
+            Pair("/", "GET")
+        )
+
+        for ((path, method) in candidatePaths) {
+            val fullUrl = "$normalized$path"
+            val start = System.currentTimeMillis()
+            try {
+                val pingBody = buildJsonObject {
+                    put("prompt", "ping")
+                    put("model", "hermes-3")
+                    put("message", "ping")
+                    put("text", "ping")
+                    putJsonArray("messages") {
+                        addJsonObject {
+                            put("role", "user")
+                            put("content", "ping")
+                        }
                     }
                 }
 
-                if (responseText.isNotBlank()) {
-                    return@withContext Result.success(Pair(responseText, latency))
+                val response: HttpResponse = if (method == "POST") {
+                    client.post(fullUrl) {
+                        contentType(ContentType.Application.Json)
+                        setBody(pingBody)
+                        timeout {
+                            requestTimeoutMillis = 3_000
+                            connectTimeoutMillis = 3_000
+                        }
+                    }
+                } else {
+                    client.get(fullUrl) {
+                        timeout {
+                            requestTimeoutMillis = 3_000
+                            connectTimeoutMillis = 3_000
+                        }
+                    }
                 }
-                return@withContext Result.failure(Exception("Resposta vazia do servidor Hermes"))
-            } else {
-                // Non-200 status
-                return@withContext Result.failure(
-                    Exception("Servidor respondeu com código HTTP ${response.status.value}: $responseText")
+
+                val latency = System.currentTimeMillis() - start
+                val code = response.status.value
+                val isSuccess = response.status.isSuccess()
+                val message = when (code) {
+                    200 -> "200 OK (Disponível)"
+                    405 -> "405 Method Not Allowed"
+                    404 -> "404 Not Found"
+                    422 -> "422 Unprocessable Entity"
+                    else -> "HTTP $code"
+                }
+
+                results.add(
+                    EndpointProbeResult(
+                        path = path,
+                        method = method,
+                        statusCode = code,
+                        isSuccess = isSuccess,
+                        message = message,
+                        latencyMs = latency
+                    )
+                )
+            } catch (e: Exception) {
+                val latency = System.currentTimeMillis() - start
+                results.add(
+                    EndpointProbeResult(
+                        path = path,
+                        method = method,
+                        statusCode = 0,
+                        isSuccess = false,
+                        message = e.message ?: "Erro de ligação",
+                        latencyMs = latency
+                    )
                 )
             }
-        } catch (e: Exception) {
-            val latency = System.currentTimeMillis() - startTime
-            Log.e("HermesApiClient", "Error sending message to $endpoint", e)
-
-            // Try fallback endpoint /api/chat or /generate
-            try {
-                val fallbackEndpoint = "${normalized.removeSuffix("/")}/api/chat"
-                val fallbackResponse: HttpResponse = client.post(fallbackEndpoint) {
-                    contentType(ContentType.Application.Json)
-                    setBody(requestBody)
-                }
-                if (fallbackResponse.status.isSuccess()) {
-                    val fallbackText = fallbackResponse.bodyAsText()
-                    return@withContext Result.success(Pair(fallbackText, System.currentTimeMillis() - startTime))
-                }
-            } catch (_: Exception) {
-                // Secondary endpoint failed as well
-            }
-
-            val friendlyMessage = when {
-                e.message?.contains("Failed to connect", ignoreCase = true) == true ||
-                e.message?.contains("Connection refused", ignoreCase = true) == true ->
-                    "Impossível ligar a $endpoint.\nCertifica-te de que o servidor Hermes está ativo no Termux na porta 9119."
-                e.message?.contains("timeout", ignoreCase = true) == true ->
-                    "Tempo limite atingido durante a geração do modelo Hermes."
-                else -> e.localizedMessage ?: "Erro ao comunicar com o servidor Hermes."
-            }
-
-            return@withContext Result.failure(Exception(friendlyMessage, e))
         }
+        return@withContext results
     }
 
     suspend fun fetchMessages(baseUrl: String): Result<List<ChatMessage>> = withContext(Dispatchers.IO) {

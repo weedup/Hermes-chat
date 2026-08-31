@@ -37,10 +37,38 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _availableModels = MutableStateFlow<List<String>>(emptyList())
     val availableModels: StateFlow<List<String>> = _availableModels.asStateFlow()
 
+    private val _isProbingEndpoints = MutableStateFlow(false)
+    val isProbingEndpoints: StateFlow<Boolean> = _isProbingEndpoints.asStateFlow()
+
+    private val _endpointProbes = MutableStateFlow<List<com.example.data.EndpointProbeResult>>(emptyList())
+    val endpointProbes: StateFlow<List<com.example.data.EndpointProbeResult>> = _endpointProbes.asStateFlow()
+
     fun updateServerUrl(url: String) {
         viewModelScope.launch {
             preferencesManager.updateServerUrl(url)
             _testResult.value = null
+            _endpointProbes.value = emptyList()
+        }
+    }
+
+    fun updateCustomEndpoint(endpoint: String) {
+        viewModelScope.launch {
+            preferencesManager.updateCustomEndpoint(endpoint)
+            if (settings.value.hapticEnabled) {
+                hapticHelper.trigger(HapticHelper.HapticType.CLICK)
+            }
+        }
+    }
+
+    fun probeServerEndpoints() {
+        viewModelScope.launch {
+            _isProbingEndpoints.value = true
+            val results = apiClient.probeEndpoints(settings.value.serverUrl)
+            _endpointProbes.value = results
+            _isProbingEndpoints.value = false
+            if (settings.value.hapticEnabled) {
+                hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
+            }
         }
     }
 
