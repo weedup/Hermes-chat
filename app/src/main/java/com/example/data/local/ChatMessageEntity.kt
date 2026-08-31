@@ -31,6 +31,7 @@ fun ChatMessageEntity.toDomain(): ChatMessage {
         timestamp = timestamp,
         status = when (status) {
             "SENDING" -> MessageStatus.SENDING
+            "STREAMING" -> MessageStatus.STREAMING
             "ERROR" -> MessageStatus.ERROR
             else -> MessageStatus.SENT
         },

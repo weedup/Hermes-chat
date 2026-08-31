@@ -11,6 +11,7 @@ enum class MessageSender {
 
 enum class MessageStatus {
     SENDING,
+    STREAMING,
     SENT,
     ERROR
 }

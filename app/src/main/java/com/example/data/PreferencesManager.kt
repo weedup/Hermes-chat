@@ -29,7 +29,7 @@ class PreferencesManager(private val context: Context) {
         const val DEFAULT_MODEL = "hermes-agent"
         const val DEFAULT_SYSTEM_PROMPT = "Tu és o Hermes, um modelo de inteligência artificial de elite a correr localmente no dispositivo via Termux."
         const val DEFAULT_TEMPERATURE = 0.7f
-        const val DEFAULT_MAX_TOKENS = 2048
+        const val DEFAULT_MAX_TOKENS = 512
     }
 
     val settingsFlow: Flow<HermesSettings> = context.dataStore.data.map { preferences ->

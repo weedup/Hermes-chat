@@ -73,25 +73,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val url = settings.value.serverUrl
             val health = apiClient.checkHealth(url)
             _serverHealth.value = health
-            if (health.isReachable) {
-                syncRemoteMessages()
-            }
         }
     }
 
     fun syncRemoteMessages() {
-        viewModelScope.launch {
-            val url = settings.value.serverUrl
-            val result = apiClient.fetchMessages(url)
-            if (result.isSuccess) {
-                val remoteMessages = result.getOrNull()
-                if (!remoteMessages.isNullOrEmpty()) {
-                    for (msg in remoteMessages) {
-                        repository.insertMessage(msg)
-                    }
-                }
-            }
-        }
+        // Desativado: o histórico é apenas local (Room DB).
+        // O Hermes guarda o contexto da conversa no perfil.
     }
 
     fun sendMessage(overrideText: String? = null) {
@@ -129,6 +116,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             val currentSettings = settings.value
             val history = messages.value.filter { it.status == MessageStatus.SENT }
+
+            // Callback de streaming: actualiza a mensagem em tempo real
+            apiClient.onStreamChunk = { chunk ->
+                viewModelScope.launch {
+                    val currentText = pendingHermesMsg.text
+                    val newText = if (currentText == "...") chunk else currentText + chunk
+                    val updated = pendingHermesMsg.copy(
+                        text = newText,
+                        status = MessageStatus.STREAMING
+                    )
+                    repository.updateMessage(updated)
+                }
+            }
 
             val result = apiClient.sendMessage(
                 baseUrl = currentSettings.serverUrl,

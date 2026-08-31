@@ -15,12 +15,14 @@ import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import io.ktor.utils.io.readUTF8Line
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -152,6 +154,12 @@ class HermesApiClient {
         }
     }
 
+    /**
+     * Callback para streaming: chamado com cada fragmento de texto à medida que chega.
+     * Se for null, o pedido é feito sem streaming (compatibilidade).
+     */
+    var onStreamChunk: ((String) -> Unit)? = null
+
     suspend fun sendMessage(
         baseUrl: String,
         history: List<ChatMessage>,
@@ -195,12 +203,13 @@ class HermesApiClient {
         val fullPromptText = fullPromptBuilder.toString()
 
         // JSON payload variants
+        val isStreaming = onStreamChunk != null
         val openAiPayload = OpenAiChatRequest(
             model = modelEffective,
             messages = messagesList,
             temperature = temperature,
             maxTokens = maxTokens,
-            stream = false
+            stream = isStreaming
         )
 
         // Simple dict payload for FastAPI / Flask / Python local scripts
@@ -276,6 +285,47 @@ class HermesApiClient {
                             setBody(payload)
                         } else if (payload is JsonObject) {
                             setBody(payload)
+                        }
+                    }
+
+                    // Streaming SSE: se onStreamChunk está definido e a resposta é texto/event-stream
+                    if (isStreaming && response.status.isSuccess()) {
+                        val ct = response.headers[HttpHeaders.ContentType] ?: ""
+                        if (ct.contains("text/event-stream", ignoreCase = true) ||
+                            ct.contains("text/plain", ignoreCase = true)) {
+                            val fullText = StringBuilder()
+                            try {
+                                val channel = response.bodyAsChannel()
+                                while (!channel.isClosedForRead) {
+                                    val line = channel.readUTF8Line() ?: break
+                                    if (line.startsWith("data: ")) {
+                                        val data = line.removePrefix("data: ").trim()
+                                        if (data == "[DONE]") break
+                                        try {
+                                            val sseJson = jsonConfig.parseToJsonElement(data)
+                                            if (sseJson is JsonObject) {
+                                                val delta = sseJson["choices"]?.jsonArray
+                                                    ?.firstOrNull()?.jsonObject
+                                                    ?.get("delta")?.jsonObject
+                                                val chunk = delta?.get("content")?.jsonPrimitive?.contentOrNull
+                                                    ?: sseJson["choices"]?.jsonArray
+                                                        ?.firstOrNull()?.jsonObject
+                                                        ?.get("text")?.jsonPrimitive?.contentOrNull
+                                                if (!chunk.isNullOrBlank()) {
+                                                    fullText.append(chunk)
+                                                    onStreamChunk?.invoke(chunk)
+                                                }
+                                            }
+                                        } catch (_: Exception) { /* skip malformed SSE */ }
+                                    }
+                                }
+                            } catch (_: Exception) { /* fallback to non-streaming below */ }
+                            val result = fullText.toString().ifBlank { null }
+                            if (result != null) {
+                                val latency = System.currentTimeMillis() - startTime
+                                Log.d("HermesApiClient", "SSE stream success from $fullUrl in ${latency}ms")
+                                return@withContext Result.success(Pair(result, latency))
+                            }
                         }
                     }
 

@@ -548,7 +548,17 @@ fun MessageBubble(
                                 fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
                             )
                         }
-                    } else if (message.status == MessageStatus.ERROR) {
+                    } else if (message.status == MessageStatus.STREAMING && !isUser) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                color = GoldPrimary,
+                                modifier = Modifier.size(12.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else if (message.status == MessageStatus.ERROR) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
