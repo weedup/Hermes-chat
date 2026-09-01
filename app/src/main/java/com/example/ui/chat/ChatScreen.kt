@@ -494,8 +494,36 @@ fun MessageBubble(
 ) {
     val context = LocalContext.current
     val isUser = message.sender == MessageSender.USER
+    val isSystemNotice = message.sender == MessageSender.SYSTEM
     val timeFormatted = remember(message.timestamp) {
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
+    }
+
+    if (isSystemNotice) {
+        // Notícia local de comando (/new, /model, ...) — pill centrada discreta
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = message.text,
+                style = MaterialTheme.typography.bodySmall,
+                color = GoldPrimary.copy(alpha = 0.85f),
+                modifier = Modifier
+                    .background(
+                        HermesBubbleBg.copy(alpha = 0.6f),
+                        RoundedCornerShape(12.dp)
+                    )
+                    .border(
+                        BorderStroke(1.dp, HermesBubbleBorder),
+                        RoundedCornerShape(12.dp)
+                    )
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            )
+        }
+        return
     }
 
     Column(

@@ -109,9 +109,99 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // O Hermes guarda o contexto da conversa no perfil.
     }
 
+    /**
+     * Comandos locais (estilo Hermes) — processados na app, sem gastar tokens:
+     *   /new            -> limpa histórico + nova sessão
+     *   /clear          -> limpa histórico
+     *   /model          -> lista modelos disponíveis (GET /v1/models)
+     *   /model <nome>   -> troca o modelo activo
+     *   /help           -> lista de comandos
+     * Devolve true se foi comando (e já foi tratado).
+     */
+    private fun handleCommand(cmdRaw: String): Boolean {
+        val cmd = cmdRaw.trim()
+        if (!cmd.startsWith("/")) return false
+        val parts = cmd.split("\\s+".toRegex())
+        when (parts[0].lowercase()) {
+            "/new", "/clear" -> {
+                viewModelScope.launch {
+                    if (settings.value.hapticEnabled) {
+                        hapticHelper.trigger(HapticHelper.HapticType.HEAVY_CLICK)
+                    }
+                    repository.clearHistory()
+                    insertLocalNotice(
+                        when (parts[0].lowercase()) {
+                            "/new" -> "Nova sessão ✓ histórico limpo."
+                            else -> "Histórico limpo ✓"
+                        }
+                    )
+                }
+                return true
+            }
+            "/help" -> {
+                viewModelScope.launch {
+                    insertLocalNotice(
+                        "Comandos disponíveis:\n" +
+                            "/new — nova sessão (limpa histórico)\n" +
+                            "/clear — limpar histórico\n" +
+                            "/model — listar modelos\n" +
+                            "/model <nome> — trocar de modelo\n" +
+                            "/help — esta ajuda"
+                    )
+                }
+                return true
+            }
+            "/model" -> {
+                viewModelScope.launch {
+                    if (parts.size >= 2) {
+                        val newModel = parts.drop(1).joinToString(" ").trim()
+                        preferencesManager.updateModelName(newModel)
+                        insertLocalNotice("Modelo alterado para: $newModel ✓")
+                    } else {
+                        val models = apiClient.fetchModels(settings.value.serverUrl)
+                        val current = settings.value.modelName
+                        insertLocalNotice(
+                            "Modelo actual: $current\nDisponíveis:\n" +
+                                models.joinToString("\n") { m -> if (m == current) "• $current ←" else "• $m" } +
+                                "\n\nUsa /model <nome> para trocar."
+                        )
+                    }
+                }
+                return true
+            }
+            else -> {
+                viewModelScope.launch {
+                    insertLocalNotice(
+                        "Comando desconhecido: ${parts[0]}\nUsa /help para ver os disponíveis."
+                    )
+                }
+                return true
+            }
+        }
+    }
+
+    /** Mensagem de sistema mostrada no chat (sem ir para o modelo). */
+    private suspend fun insertLocalNotice(text: String) {
+        repository.insertMessage(
+            ChatMessage(
+                id = UUID.randomUUID().toString(),
+                text = text,
+                sender = MessageSender.SYSTEM,
+                timestamp = System.currentTimeMillis(),
+                status = MessageStatus.SENT
+            )
+        )
+    }
+
     fun sendMessage(overrideText: String? = null) {
         val textToSend = (overrideText ?: _inputText.value).trim()
         if (textToSend.isBlank()) return
+
+        // Comandos tipo Hermes: processados localmente, 0 tokens
+        if (handleCommand(textToSend)) {
+            _inputText.value = ""
+            return
+        }
 
         // Se já está a gerar, mete em fila (permite enviar durante o "a pensar")
         if (_isGenerating.value) {
