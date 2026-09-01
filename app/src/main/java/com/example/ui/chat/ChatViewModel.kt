@@ -132,9 +132,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * Comandos locais (estilo Hermes) — processados na app, sem gastar tokens:
      *   /new            -> limpa histórico + nova sessão
      *   /clear          -> limpa histórico
-     *   /model          -> lista modelos disponíveis (GET /v1/models)
-     *   /model <nome>   -> troca o modelo activo
-     *   /help           -> lista de comandos
+     *   /profile        -> mostra o perfil/agente activo na conversa e no toast
+     *   /stop           -> interrompe a geração em curso
      * Devolve true se foi comando (e já foi tratado).
      */
     private fun handleCommand(cmdRaw: String): Boolean {
@@ -152,10 +151,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 showToast(if (parts[0].lowercase() == "/new") "Nova sessão ✓ histórico limpo" else "Histórico limpo ✓")
                 return true
             }
-            "/help" -> {
-                showToast("/new /clear /model [nome] /stop /help")
-                return true
-            }
             "/stop" -> {
                 val job = generateJob
                 if (_isGenerating.value && job != null && job.isActive) {
@@ -170,22 +165,36 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 return true
             }
-            "/model" -> {
-                if (parts.size >= 2) {
-                    val newModel = parts.drop(1).joinToString(" ").trim()
-                    viewModelScope.launch { preferencesManager.updateModelName(newModel) }
-                    showToast("Modelo: $newModel ✓")
-                } else {
-                    viewModelScope.launch {
-                        val models = apiClient.fetchModels(settings.value.serverUrl)
-                        val current = settings.value.modelName
-                        showToast("Modelo: $current | Disp.: " + models.filter { it != current }.joinToString(", "))
+            "/profile" -> {
+                viewModelScope.launch {
+                    if (settings.value.hapticEnabled) {
+                        hapticHelper.trigger(HapticHelper.HapticType.LIGHT_TICK)
                     }
+                    val details = apiClient.fetchProfileDetails(settings.value.serverUrl)
+                    val activeName = details?.get("alias") ?: details?.get("name") ?: _agentName.value ?: "Hermes"
+                    val profileId = details?.get("profile") ?: "default"
+                    
+                    if (!details.isNullOrEmpty()) {
+                        _agentName.value = activeName
+                    }
+
+                    val noticeMsg = ChatMessage(
+                        id = UUID.randomUUID().toString(),
+                        text = "👤 Perfil Ativo: $activeName (perfil: $profileId)",
+                        sender = MessageSender.SYSTEM,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    repository.insertMessage(noticeMsg)
+                    showToast("Perfil ativo: $activeName ($profileId)")
                 }
                 return true
             }
+            "/help" -> {
+                showToast("Comandos: /new, /profile, /stop")
+                return true
+            }
             else -> {
-                showToast("Comando desconhecido: ${parts[0]} (usa /help)")
+                showToast("Comando desconhecido: ${parts[0]} (usa /new, /profile, /stop)")
                 return true
             }
         }

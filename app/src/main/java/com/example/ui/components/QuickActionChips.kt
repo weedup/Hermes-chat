@@ -18,7 +18,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
@@ -74,9 +74,8 @@ val defaultQuickPrompts = listOf(
 // Comandos locais estilo Hermes (processados na app, 0 tokens)
 val commandChips = listOf(
     QuickPrompt(title = "/new", prompt = "/new", icon = Icons.Default.Add),
-    QuickPrompt(title = "/model", prompt = "/model", icon = Icons.Default.Memory),
-    QuickPrompt(title = "/stop", prompt = "/stop", icon = Icons.Default.Stop),
-    QuickPrompt(title = "/help", prompt = "/help", icon = Icons.Default.Info)
+    QuickPrompt(title = "/profile", prompt = "/profile", icon = Icons.Default.Person),
+    QuickPrompt(title = "/stop", prompt = "/stop", icon = Icons.Default.Stop)
 )
 
 @Composable

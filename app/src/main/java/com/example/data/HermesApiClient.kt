@@ -192,6 +192,39 @@ class HermesApiClient {
         return@withContext null
     }
 
+    /**
+     * Devolve detalhes do perfil ativo (nome, id do perfil, etc.)
+     */
+    suspend fun fetchProfileDetails(baseUrl: String): Map<String, String>? = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl).removeSuffix("/")
+        val candidates = listOf("/profile", "/api/profile", "/v1/profile")
+        for (path in candidates) {
+            try {
+                val response: HttpResponse = client.get("$normalized$path") {
+                    timeout {
+                        requestTimeoutMillis = 3_000
+                        connectTimeoutMillis = 3_000
+                        socketTimeoutMillis = 3_000
+                    }
+                }
+                if (response.status.isSuccess()) {
+                    val text = response.bodyAsText()
+                    val element = jsonConfig.parseToJsonElement(text)
+                    if (element is JsonObject) {
+                        val result = mutableMapOf<String, String>()
+                        element["name"]?.jsonPrimitive?.contentOrNull?.let { result["name"] = it }
+                        element["profile"]?.jsonPrimitive?.contentOrNull?.let { result["profile"] = it }
+                        element["alias"]?.jsonPrimitive?.contentOrNull?.let { result["alias"] = it }
+                        if (result.isNotEmpty()) return@withContext result
+                    }
+                }
+            } catch (_: Exception) {
+                // tenta o próximo endpoint
+            }
+        }
+        return@withContext null
+    }
+
     suspend fun sendMessage(
         baseUrl: String,
         history: List<ChatMessage>,

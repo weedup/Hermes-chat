@@ -269,14 +269,13 @@ fun ChatScreen(
                 }
             }
 
-            // Comandos locais (/new /model /stop /help) — sempre visíveis
+            // Comandos locais (/new /profile /stop) — sempre visíveis
             CommandChipRow(
                 onPromptSelected = { cmd ->
                     viewModel.hapticHelper.trigger(HapticHelper.HapticType.LIGHT_TICK, settings.hapticEnabled)
                     viewModel.sendMessage(cmd)
                 }
             )
-
             // Quick Prompts row when typing or starting
             AnimatedVisibility(
                 visible = messages.isNotEmpty() && !isGenerating,
