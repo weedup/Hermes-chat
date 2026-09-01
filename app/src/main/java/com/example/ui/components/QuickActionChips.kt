@@ -14,10 +14,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -67,6 +70,53 @@ val defaultQuickPrompts = listOf(
         icon = Icons.Default.Speed
     )
 )
+
+// Comandos locais estilo Hermes (processados na app, 0 tokens)
+val commandChips = listOf(
+    QuickPrompt(title = "/new", prompt = "/new", icon = Icons.Default.Add),
+    QuickPrompt(title = "/model", prompt = "/model", icon = Icons.Default.Memory),
+    QuickPrompt(title = "/stop", prompt = "/stop", icon = Icons.Default.Stop),
+    QuickPrompt(title = "/help", prompt = "/help", icon = Icons.Default.Info)
+)
+
+@Composable
+fun CommandChipRow(
+    onPromptSelected: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        commandChips.forEach { item ->
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(NavySurfaceCard)
+                    .border(1.dp, NavyBorder, RoundedCornerShape(16.dp))
+                    .clickable { onPromptSelected(item.prompt) }
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = item.icon,
+                    contentDescription = null,
+                    tint = GoldAccent,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = item.title,
+                    color = GoldPrimary,
+                    fontSize = 12.sp
+                )
+            }
+        }
+    }
+}
 
 @Composable
 fun QuickPromptRow(

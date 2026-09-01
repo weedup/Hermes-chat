@@ -65,6 +65,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     init {
         checkServerHealth()
         refreshAgentName()
+        refreshRealModelName()
         // Consome a fila de mensagens pendentes à medida que a geração termina
         viewModelScope.launch {
             _isGenerating.collect { generating ->
@@ -83,6 +84,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val name = apiClient.fetchProfile(settings.value.serverUrl)
             if (!name.isNullOrBlank()) {
                 _agentName.value = name
+            }
+        }
+    }
+
+    /**
+     * Se o modelo guardado é o default "hermes-agent" (placeholder), substitui-o
+     * pelo primeiro modelo real devolvido pelo servidor (GET /v1/models).
+     */
+    fun refreshRealModelName() {
+        viewModelScope.launch {
+            val current = settings.value.modelName
+            if (current.isNotBlank() && current != PreferencesManager.DEFAULT_MODEL) return@launch
+            val models = apiClient.fetchModels(settings.value.serverUrl)
+            val real = models.firstOrNull { it.isNotBlank() }
+            if (real != null && real != current) {
+                preferencesManager.updateModelName(real)
             }
         }
     }
@@ -131,27 +148,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         hapticHelper.trigger(HapticHelper.HapticType.HEAVY_CLICK)
                     }
                     repository.clearHistory()
-                    insertLocalNotice(
-                        when (parts[0].lowercase()) {
-                            "/new" -> "Nova sessão ✓ histórico limpo."
-                            else -> "Histórico limpo ✓"
-                        }
-                    )
                 }
+                showToast(if (parts[0].lowercase() == "/new") "Nova sessão ✓ histórico limpo" else "Histórico limpo ✓")
                 return true
             }
             "/help" -> {
-                viewModelScope.launch {
-                    insertLocalNotice(
-                        "Comandos disponíveis:\n" +
-                            "/new — nova sessão (limpa histórico)\n" +
-                            "/clear — limpar histórico\n" +
-                            "/model — listar modelos\n" +
-                            "/model <nome> — trocar de modelo\n" +
-                            "/stop — abortar geração em curso\n" +
-                            "/help — esta ajuda"
-                    )
-                }
+                showToast("/new /clear /model [nome] /stop /help")
                 return true
             }
             "/stop" -> {
@@ -159,59 +161,39 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 if (_isGenerating.value && job != null && job.isActive) {
                     job.cancel()
                     _isGenerating.value = false
-                    viewModelScope.launch {
-                        if (settings.value.hapticEnabled) {
-                            hapticHelper.trigger(HapticHelper.HapticType.HEAVY_CLICK)
-                        }
-                        insertLocalNotice("Geração abortada ✓")
+                    if (settings.value.hapticEnabled) {
+                        hapticHelper.trigger(HapticHelper.HapticType.HEAVY_CLICK)
                     }
+                    showToast("Geração abortada ✓")
                 } else {
-                    viewModelScope.launch {
-                        insertLocalNotice("Nada a abortar — não há geração em curso.")
-                    }
+                    showToast("Nada a abortar")
                 }
                 return true
             }
             "/model" -> {
-                viewModelScope.launch {
-                    if (parts.size >= 2) {
-                        val newModel = parts.drop(1).joinToString(" ").trim()
-                        preferencesManager.updateModelName(newModel)
-                        insertLocalNotice("Modelo alterado para: $newModel ✓")
-                    } else {
+                if (parts.size >= 2) {
+                    val newModel = parts.drop(1).joinToString(" ").trim()
+                    viewModelScope.launch { preferencesManager.updateModelName(newModel) }
+                    showToast("Modelo: $newModel ✓")
+                } else {
+                    viewModelScope.launch {
                         val models = apiClient.fetchModels(settings.value.serverUrl)
                         val current = settings.value.modelName
-                        insertLocalNotice(
-                            "Modelo actual: $current\nDisponíveis:\n" +
-                                models.joinToString("\n") { m -> if (m == current) "• $current ←" else "• $m" } +
-                                "\n\nUsa /model <nome> para trocar."
-                        )
+                        showToast("Modelo: $current | Disp.: " + models.filter { it != current }.joinToString(", "))
                     }
                 }
                 return true
             }
             else -> {
-                viewModelScope.launch {
-                    insertLocalNotice(
-                        "Comando desconhecido: ${parts[0]}\nUsa /help para ver os disponíveis."
-                    )
-                }
+                showToast("Comando desconhecido: ${parts[0]} (usa /help)")
                 return true
             }
         }
     }
 
-    /** Mensagem de sistema mostrada no chat (sem ir para o modelo). */
-    private suspend fun insertLocalNotice(text: String) {
-        repository.insertMessage(
-            ChatMessage(
-                id = UUID.randomUUID().toString(),
-                text = text,
-                sender = MessageSender.SYSTEM,
-                timestamp = System.currentTimeMillis(),
-                status = MessageStatus.SENT
-            )
-        )
+    /** Aviso de comando via Toast — efémero, não fica no histórico. */
+    private fun showToast(text: String) {
+        android.widget.Toast.makeText(getApplication(), text, android.widget.Toast.LENGTH_SHORT).show()
     }
 
     fun sendMessage(overrideText: String? = null) {

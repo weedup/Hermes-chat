@@ -100,6 +100,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.ChatMessage
 import com.example.data.MessageSender
 import com.example.data.MessageStatus
+import com.example.ui.components.CommandChipRow
 import com.example.ui.components.MarkdownMessageView
 import com.example.ui.components.QuickPromptRow
 import com.example.ui.components.ServerStatusBadge
@@ -267,6 +268,14 @@ fun ChatScreen(
                     }
                 }
             }
+
+            // Comandos locais (/new /model /stop /help) — sempre visíveis
+            CommandChipRow(
+                onPromptSelected = { cmd ->
+                    viewModel.hapticHelper.trigger(HapticHelper.HapticType.LIGHT_TICK, settings.hapticEnabled)
+                    viewModel.sendMessage(cmd)
+                }
+            )
 
             // Quick Prompts row when typing or starting
             AnimatedVisibility(
