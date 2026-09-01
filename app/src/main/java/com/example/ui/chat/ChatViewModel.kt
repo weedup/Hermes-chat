@@ -47,6 +47,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
+    private var generateJob: kotlinx.coroutines.Job? = null
+
     private val _serverHealth = MutableStateFlow<ServerHealth?>(null)
     val serverHealth: StateFlow<ServerHealth?> = _serverHealth.asStateFlow()
 
@@ -146,8 +148,27 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             "/clear — limpar histórico\n" +
                             "/model — listar modelos\n" +
                             "/model <nome> — trocar de modelo\n" +
+                            "/stop — abortar geração em curso\n" +
                             "/help — esta ajuda"
                     )
+                }
+                return true
+            }
+            "/stop" -> {
+                val job = generateJob
+                if (_isGenerating.value && job != null && job.isActive) {
+                    job.cancel()
+                    _isGenerating.value = false
+                    viewModelScope.launch {
+                        if (settings.value.hapticEnabled) {
+                            hapticHelper.trigger(HapticHelper.HapticType.HEAVY_CLICK)
+                        }
+                        insertLocalNotice("Geração abortada ✓")
+                    }
+                } else {
+                    viewModelScope.launch {
+                        insertLocalNotice("Nada a abortar — não há geração em curso.")
+                    }
                 }
                 return true
             }
@@ -246,6 +267,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             repository.insertMessage(userMsg)
             repository.insertMessage(pendingHermesMsg)
             _isGenerating.value = true
+            generateJob = coroutineContext[kotlinx.coroutines.Job]
 
             val currentSettings = settings.value
             val history = messages.value.filter { it.status == MessageStatus.SENT }
