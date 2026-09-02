@@ -3,6 +3,19 @@ package com.example.data
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
+@Serializable
+data class ProfileDto(
+    val id: String,
+    val name: String,
+    val active: Boolean = false
+)
+
+@Serializable
+data class ProfileListResponse(
+    val current: String = "default",
+    val profiles: List<ProfileDto> = emptyList()
+)
+
 enum class MessageSender {
     USER,
     HERMES,
@@ -78,16 +91,22 @@ data class OpenAiMessage(
 data class OpenAiChatResponse(
     val id: String? = null,
     val choices: List<OpenAiChoice> = emptyList(),
-    val usage: OpenAiUsage? = null,
-    val error: OpenAiError? = null
+    val usage: OpenAiUsage? = null
 )
 
 @Serializable
 data class OpenAiChoice(
     val index: Int = 0,
     val message: OpenAiMessage? = null,
+    val delta: OpenAiDelta? = null,
     @SerialName("finish_reason")
     val finishReason: String? = null
+)
+
+@Serializable
+data class OpenAiDelta(
+    val role: String? = null,
+    val content: String? = null
 )
 
 @Serializable
@@ -98,13 +117,6 @@ data class OpenAiUsage(
     val completionTokens: Int = 0,
     @SerialName("total_tokens")
     val totalTokens: Int = 0
-)
-
-@Serializable
-data class OpenAiError(
-    val message: String? = null,
-    val type: String? = null,
-    val code: String? = null
 )
 
 @Serializable

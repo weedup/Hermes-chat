@@ -10,53 +10,58 @@ import com.example.data.HermesSettings
 import com.example.data.MessageSender
 import com.example.data.MessageStatus
 import com.example.data.PreferencesManager
+import com.example.data.ProfileDto
 import com.example.data.ServerHealth
+import com.example.data.local.HermesChatDatabase
 import com.example.util.HapticHelper
+import java.util.UUID
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.util.UUID
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = ChatRepository(application)
+    private val database = HermesChatDatabase.getInstance(application)
+    private val repository = ChatRepository(database.chatMessageDao())
     private val preferencesManager = PreferencesManager(application)
     private val apiClient = HermesApiClient()
     val hapticHelper = HapticHelper(application)
 
-    val settings: StateFlow<HermesSettings> = preferencesManager.settingsFlow
-        .stateIn(
-            viewModelScope,
-            SharingStarted.Eagerly,
-            HermesSettings()
-        )
+    val settings: StateFlow<HermesSettings> = preferencesManager.settingsFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = HermesSettings()
+    )
 
-    val messages: StateFlow<List<ChatMessage>> = repository.messages
-        .stateIn(
-            viewModelScope,
-            SharingStarted.Eagerly,
-            emptyList()
-        )
+    val messages: StateFlow<List<ChatMessage>> = repository.allMessages.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 
-    private val _inputText = MutableStateFlow("")
-    val inputText: StateFlow<String> = _inputText.asStateFlow()
+    private val _serverHealth = MutableStateFlow<ServerHealth?>(null)
+    val serverHealth: StateFlow<ServerHealth?> = _serverHealth.asStateFlow()
 
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
-    private var generateJob: kotlinx.coroutines.Job? = null
-
-    private val _serverHealth = MutableStateFlow<ServerHealth?>(null)
-    val serverHealth: StateFlow<ServerHealth?> = _serverHealth.asStateFlow()
+    private val _inputText = MutableStateFlow("")
+    val inputText: StateFlow<String> = _inputText.asStateFlow()
 
     private val _isSPenHovering = MutableStateFlow(false)
     val isSPenHovering: StateFlow<Boolean> = _isSPenHovering.asStateFlow()
 
     private val _agentName = MutableStateFlow<String?>(null)
     val agentName: StateFlow<String?> = _agentName.asStateFlow()
+
+    private val _availableProfiles = MutableStateFlow<List<ProfileDto>>(emptyList())
+    val availableProfiles: StateFlow<List<ProfileDto>> = _availableProfiles.asStateFlow()
+
+    private var generateJob: Job? = null
 
     private val _pendingQueue = MutableStateFlow<List<String>>(emptyList())
     private val _pendingCount = MutableStateFlow(0)
@@ -66,7 +71,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         checkServerHealth()
         refreshAgentName()
         refreshRealModelName()
-        // Consome a fila de mensagens pendentes à medida que a geração termina
         viewModelScope.launch {
             _isGenerating.collect { generating ->
                 if (!generating && _pendingQueue.value.isNotEmpty()) {
@@ -81,17 +85,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshAgentName() {
         viewModelScope.launch {
-            val name = apiClient.fetchProfile(settings.value.serverUrl)
-            if (!name.isNullOrBlank()) {
-                _agentName.value = name
+            val res = apiClient.fetchProfilesList(settings.value.serverUrl)
+            if (res != null && res.profiles.isNotEmpty()) {
+                _availableProfiles.value = res.profiles
+                val activeProf = res.profiles.firstOrNull { it.active || it.id == res.current }
+                    ?: res.profiles.first()
+                _agentName.value = activeProf.name
+            } else {
+                val name = apiClient.fetchProfile(settings.value.serverUrl)
+                if (!name.isNullOrBlank()) {
+                    _agentName.value = name
+                }
             }
         }
     }
 
-    /**
-     * Se o modelo guardado é o default "hermes-agent" (placeholder), substitui-o
-     * pelo primeiro modelo real devolvido pelo servidor (GET /v1/models).
-     */
     fun refreshRealModelName() {
         viewModelScope.launch {
             val current = settings.value.modelName
@@ -123,19 +131,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun syncRemoteMessages() {
-        // Desativado: o histórico é apenas local (Room DB).
-        // O Hermes guarda o contexto da conversa no perfil.
+    fun switchProfile(profileId: String, profileName: String) {
+        viewModelScope.launch {
+            if (settings.value.hapticEnabled) {
+                hapticHelper.trigger(HapticHelper.HapticType.LIGHT_TICK)
+            }
+            val success = apiClient.selectProfile(settings.value.serverUrl, profileId)
+            _agentName.value = profileName
+            refreshAgentName()
+            
+            val noticeMsg = ChatMessage(
+                id = UUID.randomUUID().toString(),
+                text = "✨ Perfil alterado para **$profileName** ($profileId)",
+                sender = MessageSender.SYSTEM,
+                timestamp = System.currentTimeMillis()
+            )
+            repository.insertMessage(noticeMsg)
+            showToast("Perfil ativo: $profileName")
+        }
     }
 
-    /**
-     * Comandos locais (estilo Hermes) — processados na app, sem gastar tokens:
-     *   /new            -> limpa histórico + nova sessão
-     *   /clear          -> limpa histórico
-     *   /profile        -> mostra o perfil/agente activo na conversa e no toast
-     *   /stop           -> interrompe a geração em curso
-     * Devolve true se foi comando (e já foi tratado).
-     */
     private fun handleCommand(cmdRaw: String): Boolean {
         val cmd = cmdRaw.trim()
         if (!cmd.startsWith("/")) return false
@@ -166,26 +181,37 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 return true
             }
             "/profile" -> {
-                viewModelScope.launch {
-                    if (settings.value.hapticEnabled) {
-                        hapticHelper.trigger(HapticHelper.HapticType.LIGHT_TICK)
-                    }
-                    val details = apiClient.fetchProfileDetails(settings.value.serverUrl)
-                    val activeName = details?.get("alias") ?: details?.get("name") ?: _agentName.value ?: "Hermes"
-                    val profileId = details?.get("profile") ?: "default"
-                    
-                    if (!details.isNullOrEmpty()) {
-                        _agentName.value = activeName
-                    }
+                if (parts.size >= 2) {
+                    val target = parts[1].lowercase()
+                    val targetName = if (target == "tara") "Tara" else if (target == "default") "Agent T" else target.capitalize()
+                    switchProfile(target, targetName)
+                } else {
+                    viewModelScope.launch {
+                        if (settings.value.hapticEnabled) {
+                            hapticHelper.trigger(HapticHelper.HapticType.LIGHT_TICK)
+                        }
+                        val res = apiClient.fetchProfilesList(settings.value.serverUrl)
+                        val profs = res?.profiles ?: listOf(
+                            ProfileDto("default", "Agent T", true),
+                            ProfileDto("tara", "Tara", false)
+                        )
+                        _availableProfiles.value = profs
+                        val currentActive = profs.firstOrNull { it.active || it.id == res?.current }?.name ?: _agentName.value ?: "Hermes"
 
-                    val noticeMsg = ChatMessage(
-                        id = UUID.randomUUID().toString(),
-                        text = "👤 Perfil Ativo: $activeName (perfil: $profileId)",
-                        sender = MessageSender.SYSTEM,
-                        timestamp = System.currentTimeMillis()
-                    )
-                    repository.insertMessage(noticeMsg)
-                    showToast("Perfil ativo: $activeName ($profileId)")
+                        val listText = buildString {
+                            appendLine("👤 **Escolhe o Perfil Hermes:**")
+                            appendLine("Ativo: **$currentActive**")
+                            appendLine()
+                            append("Toca numa das opções abaixo para alternar:")
+                        }
+                        val noticeMsg = ChatMessage(
+                            id = UUID.randomUUID().toString(),
+                            text = listText,
+                            sender = MessageSender.SYSTEM,
+                            timestamp = System.currentTimeMillis()
+                        )
+                        repository.insertMessage(noticeMsg)
+                    }
                 }
                 return true
             }
@@ -200,7 +226,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Aviso de comando via Toast — efémero, não fica no histórico. */
     private fun showToast(text: String) {
         android.widget.Toast.makeText(getApplication(), text, android.widget.Toast.LENGTH_SHORT).show()
     }
@@ -209,13 +234,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val textToSend = (overrideText ?: _inputText.value).trim()
         if (textToSend.isBlank()) return
 
-        // Comandos tipo Hermes: processados localmente, 0 tokens
         if (handleCommand(textToSend)) {
             _inputText.value = ""
             return
         }
 
-        // Se já está a gerar, mete em fila (permite enviar durante o "a pensar")
         if (_isGenerating.value) {
             _pendingQueue.value = _pendingQueue.value + textToSend
             _pendingCount.value = _pendingQueue.value.size
@@ -263,7 +286,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val currentSettings = settings.value
             val history = messages.value.filter { it.status == MessageStatus.SENT }
 
-            // Callback de streaming: actualiza a mensagem em tempo real
             apiClient.onStreamChunk = { chunk ->
                 viewModelScope.launch {
                     val currentText = pendingHermesMsg.text
@@ -300,7 +322,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 if (currentSettings.hapticEnabled) {
                     hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
                 }
-                // Refresh health state
                 _serverHealth.value = ServerHealth(
                     isReachable = true,
                     statusCode = 200,
@@ -341,17 +362,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun deleteMessage(id: String) {
+    fun deleteMessage(msgId: String) {
         viewModelScope.launch {
-            repository.deleteMessage(id)
+            repository.deleteMessage(msgId)
         }
     }
 
     fun clearChat() {
         viewModelScope.launch {
-            if (settings.value.hapticEnabled) {
-                hapticHelper.trigger(HapticHelper.HapticType.HEAVY_CLICK)
-            }
             repository.clearHistory()
         }
     }

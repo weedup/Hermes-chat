@@ -99,7 +99,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.ChatMessage
 import com.example.data.MessageSender
-import com.example.data.MessageStatus
+import com.example.data.ProfileDto
 import com.example.ui.components.CommandChipRow
 import com.example.ui.components.MarkdownMessageView
 import com.example.ui.components.QuickPromptRow
@@ -146,6 +146,7 @@ fun ChatScreen(
     val settings by viewModel.settings.collectAsState()
     val isSPenHovering by viewModel.isSPenHovering.collectAsState()
     val agentName by viewModel.agentName.collectAsState()
+    val availableProfiles by viewModel.availableProfiles.collectAsState()
     val pendingCount by viewModel.pendingCount.collectAsState()
 
     val listState = rememberLazyListState()
@@ -258,6 +259,10 @@ fun ChatScreen(
                         items(messages, key = { it.id }) { message ->
                             MessageBubble(
                                 message = message,
+                                availableProfiles = availableProfiles,
+                                onSelectProfile = { profId, profName ->
+                                    viewModel.switchProfile(profId, profName)
+                                },
                                 hapticHelper = viewModel.hapticHelper,
                                 hapticEnabled = settings.hapticEnabled,
                                 onRetry = { viewModel.retryMessage(message.id) },
@@ -269,25 +274,13 @@ fun ChatScreen(
                 }
             }
 
-            // Comandos locais (/new /profile /stop) — sempre visíveis
-            CommandChipRow(
-                onPromptSelected = { cmd ->
+            // Barra de Prompts e Comandos Deslizante Unificada
+            QuickPromptRow(
+                onPromptSelected = { prompt ->
                     viewModel.hapticHelper.trigger(HapticHelper.HapticType.LIGHT_TICK, settings.hapticEnabled)
-                    viewModel.sendMessage(cmd)
+                    viewModel.sendMessage(prompt)
                 }
             )
-            // Quick Prompts row when typing or starting
-            AnimatedVisibility(
-                visible = messages.isNotEmpty() && !isGenerating,
-                enter = fadeIn() + slideInVertically(),
-                exit = fadeOut()
-            ) {
-                QuickPromptRow(
-                    onPromptSelected = { prompt ->
-                        viewModel.sendMessage(prompt)
-                    }
-                )
-            }
 
             // "A pensar..." indicator + fila de mensagens em espera
             AnimatedVisibility(
@@ -493,6 +486,8 @@ fun ChatTopBar(
 @Composable
 fun MessageBubble(
     message: ChatMessage,
+    availableProfiles: List<ProfileDto> = emptyList(),
+    onSelectProfile: (String, String) -> Unit = { _, _ -> },
     hapticHelper: HapticHelper,
     hapticEnabled: Boolean,
     onRetry: () -> Unit,
@@ -508,20 +503,20 @@ fun MessageBubble(
     }
 
     if (isSystemNotice) {
-        // Notícia local de comando (/new, /model, ...) — pill centrada discreta
-        Box(
+        val isProfileSelection = message.text.contains("Escolhe o Perfil Hermes")
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 6.dp),
-            contentAlignment = Alignment.Center
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 text = message.text,
                 style = MaterialTheme.typography.bodySmall,
-                color = GoldPrimary.copy(alpha = 0.85f),
+                color = GoldPrimary.copy(alpha = 0.9f),
                 modifier = Modifier
                     .background(
-                        HermesBubbleBg.copy(alpha = 0.6f),
+                        HermesBubbleBg.copy(alpha = 0.7f),
                         RoundedCornerShape(12.dp)
                     )
                     .border(
@@ -530,6 +525,46 @@ fun MessageBubble(
                     )
                     .padding(horizontal = 14.dp, vertical = 8.dp)
             )
+
+            if (isProfileSelection && availableProfiles.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    availableProfiles.forEach { prof ->
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (prof.active) GoldPrimary.copy(alpha = 0.2f) else NavySurfaceCard)
+                                .border(
+                                    1.dp,
+                                    if (prof.active) GoldPrimary else NavyBorder,
+                                    RoundedCornerShape(14.dp)
+                                )
+                                .clickable {
+                                    onSelectProfile(prof.id, prof.name)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = if (prof.active) GoldPrimary else TextSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = prof.name,
+                                color = if (prof.active) GoldPrimary else TextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = if (prof.active) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
         }
         return
     }

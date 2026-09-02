@@ -40,7 +40,8 @@ import com.example.ui.theme.TextPrimary
 data class QuickPrompt(
     val title: String,
     val prompt: String,
-    val icon: ImageVector
+    val icon: ImageVector,
+    val isCommand: Boolean = false
 )
 
 val defaultQuickPrompts = listOf(
@@ -71,51 +72,12 @@ val defaultQuickPrompts = listOf(
     )
 )
 
-// Comandos locais estilo Hermes (processados na app, 0 tokens)
-val commandChips = listOf(
-    QuickPrompt(title = "/new", prompt = "/new", icon = Icons.Default.Add),
-    QuickPrompt(title = "/profile", prompt = "/profile", icon = Icons.Default.Person),
-    QuickPrompt(title = "/stop", prompt = "/stop", icon = Icons.Default.Stop)
-)
-
-@Composable
-fun CommandChipRow(
-    onPromptSelected: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        commandChips.forEach { item ->
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(NavySurfaceCard)
-                    .border(1.dp, NavyBorder, RoundedCornerShape(16.dp))
-                    .clickable { onPromptSelected(item.prompt) }
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = item.icon,
-                    contentDescription = null,
-                    tint = GoldAccent,
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = item.title,
-                    color = GoldPrimary,
-                    fontSize = 12.sp
-                )
-            }
-        }
-    }
-}
+// Comandos e Prompts na mesma lista deslizante homogénea
+val unifiedQuickItems = listOf(
+    QuickPrompt(title = "/new", prompt = "/new", icon = Icons.Default.Add, isCommand = true),
+    QuickPrompt(title = "/profile", prompt = "/profile", icon = Icons.Default.Person, isCommand = true),
+    QuickPrompt(title = "/stop", prompt = "/stop", icon = Icons.Default.Stop, isCommand = true)
+) + defaultQuickPrompts
 
 @Composable
 fun QuickPromptRow(
@@ -129,12 +91,12 @@ fun QuickPromptRow(
             .padding(horizontal = 16.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        defaultQuickPrompts.forEach { item ->
+        unifiedQuickItems.forEach { item ->
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(16.dp))
                     .background(NavySurfaceCard)
-                    .border(1.dp, NavyBorder, RoundedCornerShape(16.dp))
+                    .border(1.dp, if (item.isCommand) GoldPrimary.copy(alpha = 0.5f) else NavyBorder, RoundedCornerShape(16.dp))
                     .clickable { onPromptSelected(item.prompt) }
                     .padding(horizontal = 12.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -142,13 +104,13 @@ fun QuickPromptRow(
                 Icon(
                     imageVector = item.icon,
                     contentDescription = null,
-                    tint = GoldAccent,
+                    tint = if (item.isCommand) GoldPrimary else GoldAccent,
                     modifier = Modifier.size(14.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = item.title,
-                    color = TextPrimary,
+                    color = if (item.isCommand) GoldPrimary else TextPrimary,
                     fontSize = 12.sp
                 )
             }
