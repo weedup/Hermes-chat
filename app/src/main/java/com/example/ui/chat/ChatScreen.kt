@@ -100,7 +100,6 @@ import androidx.compose.ui.unit.sp
 import com.example.data.ChatMessage
 import com.example.data.MessageSender
 import com.example.data.ProfileDto
-import com.example.ui.components.CommandChipRow
 import com.example.ui.components.MarkdownMessageView
 import com.example.ui.components.QuickPromptRow
 import com.example.ui.components.ServerStatusBadge
