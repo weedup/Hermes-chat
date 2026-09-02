@@ -183,7 +183,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             "/profile" -> {
                 if (parts.size >= 2) {
                     val target = parts[1].lowercase()
-                    val targetName = if (target == "tara") "Tara" else if (target == "default") "Agent T" else target.capitalize()
+                    val targetName = if (target == "tara") "Tara" else if (target == "default") "Agent T" else target.replaceFirstChar { it.uppercase() }
                     switchProfile(target, targetName)
                 } else {
                     viewModelScope.launch {
