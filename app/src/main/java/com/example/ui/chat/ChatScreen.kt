@@ -911,17 +911,10 @@ fun EmptyChatState(
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(
-            text = "Sugestões de Mensagem:",
+            text = "Ligação direta ao Hermes no Termux — toca nos comandos ou sugestões acima para começar.",
             fontSize = 12.5.sp,
             color = TextTertiary,
             modifier = Modifier.align(Alignment.Start)
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        QuickPromptRow(
-            onPromptSelected = onPromptSelected,
-            modifier = Modifier.fillMaxWidth()
         )
     }
 }
