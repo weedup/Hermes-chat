@@ -25,8 +25,7 @@ import kotlinx.coroutines.launch
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val database = HermesChatDatabase.getInstance(application)
-    private val repository = ChatRepository(database.chatMessageDao())
+    private val repository = ChatRepository(application)
     private val preferencesManager = PreferencesManager(application)
     private val apiClient = HermesApiClient()
     val hapticHelper = HapticHelper(application)
@@ -37,7 +36,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         initialValue = HermesSettings()
     )
 
-    val messages: StateFlow<List<ChatMessage>> = repository.allMessages.stateIn(
+    val messages: StateFlow<List<ChatMessage>> = repository.messages.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = emptyList()

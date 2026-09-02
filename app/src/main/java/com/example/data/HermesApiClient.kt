@@ -361,6 +361,58 @@ class HermesApiClient {
         return body
     }
 
+    suspend fun probeEndpoints(baseUrl: String): List<EndpointProbeResult> = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl).removeSuffix("/")
+        val endpoints = listOf(
+            Pair("/v1/chat/completions", "POST"),
+            Pair("/chat/completions", "POST"),
+            Pair("/v1/models", "GET"),
+            Pair("/models", "GET"),
+            Pair("/health", "GET"),
+            Pair("/profile", "GET"),
+            Pair("/profiles", "GET")
+        )
+        val results = mutableListOf<EndpointProbeResult>()
+        for ((path, method) in endpoints) {
+            val start = System.currentTimeMillis()
+            try {
+                val response: HttpResponse = if (method == "GET") {
+                    client.get("$normalized$path") {
+                        timeout { requestTimeoutMillis = 2_000 }
+                    }
+                } else {
+                    client.post("$normalized$path") {
+                        timeout { requestTimeoutMillis = 2_000 }
+                    }
+                }
+                val latency = System.currentTimeMillis() - start
+                results.add(
+                    EndpointProbeResult(
+                        path = path,
+                        method = method,
+                        statusCode = response.status.value,
+                        isSuccess = response.status.isSuccess() || response.status.value in 200..499,
+                        message = "HTTP ${response.status.value}",
+                        latencyMs = latency
+                    )
+                )
+            } catch (e: Exception) {
+                val latency = System.currentTimeMillis() - start
+                results.add(
+                    EndpointProbeResult(
+                        path = path,
+                        method = method,
+                        statusCode = 0,
+                        isSuccess = false,
+                        message = e.localizedMessage ?: "Erro de ligação",
+                        latencyMs = latency
+                    )
+                )
+            }
+        }
+        return@withContext results
+    }
+
     suspend fun fetchModels(baseUrl: String): List<String> = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl)
         val endpoint = "${normalized.removeSuffix("/")}/v1/models"
