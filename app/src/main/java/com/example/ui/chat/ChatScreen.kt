@@ -85,7 +85,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -163,6 +163,8 @@ fun ChatScreen(
 
     val listState = rememberLazyListState()
     var showClearDialog by remember { mutableStateOf(false) }
+    // remember (não Saveable): o estado do dialog não deve sobreviver a navegação
+    // para Settings e voltar — era isso que reabria a janela ao andar para trás.
     var showProfileDialog by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
 
@@ -172,6 +174,8 @@ fun ChatScreen(
         if (profileDialogEvent > 0) {
             viewModel.refreshProfileInfo()
             showProfileDialog = true
+            // Consome o evento para não reabrir ao voltar das Settings
+            viewModel.consumeProfileDialogEvent()
         }
     }
 

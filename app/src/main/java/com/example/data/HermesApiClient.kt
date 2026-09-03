@@ -372,15 +372,15 @@ class HermesApiClient {
                     val latency = System.currentTimeMillis() - startTime
                     return@withContext Result.success(Pair(reply, latency))
                 } else {
-                    lastException = Exception("HTTP ${response.status.value}: ${response.status.description}")
+                    lastException = Exception("HTTP ${response.status.value} em $targetUrl — verifica o endpoint nas definições (usa AUTO para tentar /v1/chat/completions)")
                 }
             } catch (e: Exception) {
-                lastException = e
+                lastException = Exception("$targetUrl: ${e.message}", e)
             }
         }
 
         val latency = System.currentTimeMillis() - startTime
-        return@withContext Result.failure(lastException ?: Exception("Falha de ligação ao Hermes"))
+        return@withContext Result.failure(lastException ?: Exception("Falha de ligação ao Hermes (nenhum endpoint respondeu em $normalized)"))
     }
 
     private fun parseSuccessfulResponse(body: String): String {

@@ -95,6 +95,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _profileDialogEvent = MutableStateFlow(0)
     val profileDialogEvent: StateFlow<Int> = _profileDialogEvent.asStateFlow()
 
+    fun consumeProfileDialogEvent() {
+        _profileDialogEvent.value = 0
+    }
+
     private var generateJob: Job? = null
 
     init {

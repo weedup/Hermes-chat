@@ -1,33 +1,39 @@
 #!/usr/bin/env python3
-import http.server
+"""Ponte Hermes-chat: 127.0.0.1:9120 → 127.0.0.1:8642 (gateway OpenAI-compat).
+Injeta API_SERVER_KEY do .env do Hermes. Serve /profile (nome do agente via
+SOUL.md + custom_providers) e /profiles + /profile/select (perfis Hermes).
+Retransmite respostas streaming (SSE) chunk-a-chunk."""
 import http.client
-import os
 import json
+import os
+import re
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-UPSTREAM_HOST = "127.0.0.1"
-UPSTREAM_PORT = 8642
-LISTEN_PORT = 9120
+HERMES_HOME = "/root/.hermes"
+GATEWAY_HOST = "127.0.0.1"
+GATEWAY_PORT = 8642
+LISTEN = ("127.0.0.1", 9120)
 
-ENV_CANDIDATES = [
-    os.path.expanduser("~/.hermes/.env"),
-    "/root/.hermes/.env",
-    "/data/data/com.termux/files/home/.hermes/.env",
-]
 
-def load_key():
-    for path in ENV_CANDIDATES:
-        try:
-            with open(path) as fh:
-                for line in fh:
-                    if line.startswith("API_SERVER_KEY="):
-                        return line.split("=", 1)[1].strip()
-        except OSError:
-            continue
+def load_api_key():
+    # env primeiro, depois .env do hermes
+    k = os.environ.get("API_SERVER_KEY", "").strip()
+    if k:
+        return k
+    try:
+        with open(os.path.join(HERMES_HOME, ".env")) as f:
+            for line in f:
+                if line.startswith("API_SERVER_KEY="):
+                    return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
     return ""
 
-KEY = load_key()
 
-def get_profile_name(folder, default_name):
+API_KEY = load_api_key()
+
+
+def _profile_name_from_folder(folder, default_name):
     soul = os.path.join(folder, "SOUL.md")
     if os.path.isfile(soul):
         try:
@@ -43,118 +49,148 @@ def get_profile_name(folder, default_name):
             pass
     return default_name
 
+
+def agent_name():
+    return _profile_name_from_folder(HERMES_HOME, "Hermes")
+
+
+def agent_model():
+    try:
+        with open(os.path.join(HERMES_HOME, "config.yaml")) as f:
+            txt = f.read()
+        # primeiro model: depois do custom_providers
+        m = re.search(r"custom_providers:.*?model:\s*(\S+)", txt, re.S)
+        if m:
+            return m.group(1)
+        m = re.search(r"^\s*model:\s*(\S+)", txt, re.M)
+        if m:
+            return m.group(1)
+    except OSError:
+        pass
+    return ""
+
+
 def list_all_profiles():
-    home_base = os.path.expanduser("~/.hermes")
-    profiles_dir = os.path.join(home_base, "profiles")
+    profiles_dir = os.path.join(HERMES_HOME, "profiles")
     active_profile = os.environ.get("HERMES_PROFILE") or "default"
-    
-    results = []
-    results.append({
+
+    results = [{
         "id": "default",
-        "name": get_profile_name(home_base, "Agent T"),
-        "active": (active_profile == "default")
-    })
-    
+        "name": _profile_name_from_folder(HERMES_HOME, "Agent T"),
+        "active": (active_profile == "default"),
+    }]
     if os.path.isdir(profiles_dir):
         for d in sorted(os.listdir(profiles_dir)):
             p = os.path.join(profiles_dir, d)
             if os.path.isdir(p):
                 results.append({
                     "id": d,
-                    "name": get_profile_name(p, d.capitalize()),
-                    "active": (active_profile == d)
+                    "name": _profile_name_from_folder(p, d.capitalize()),
+                    "active": (active_profile == d),
                 })
     return {"current": active_profile, "profiles": results}
 
-class Handler(http.server.BaseHTTPRequestHandler):
+
+def _send_json(handler, payload, status=200):
+    data = json.dumps(payload, ensure_ascii=False).encode()
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
+
+
+class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    def _forward(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        body = self.rfile.read(length) if length else None
+    def _connect_upstream(self, body):
         headers = {
             k: v
             for k, v in self.headers.items()
             if k.lower() not in ("host", "content-length", "authorization", "connection")
         }
-        if KEY:
-            headers["Authorization"] = "Bearer %s" % KEY
+        headers["Content-Type"] = "application/json"
+        if API_KEY:
+            headers["Authorization"] = "Bearer " + API_KEY
+        conn = http.client.HTTPConnection(GATEWAY_HOST, GATEWAY_PORT, timeout=600)
+        conn.request(self.command, self.path, body=body, headers=headers)
+        return conn, conn.getresponse()
+
+    def _relay(self, body=None):
         try:
-            conn = http.client.HTTPConnection(UPSTREAM_HOST, UPSTREAM_PORT, timeout=300)
-            conn.request(self.command, self.path, body=body, headers=headers)
-            resp = conn.getresponse()
-            data = resp.read()
-            conn.close()
-        except Exception as exc:
-            payload = ('{"error":"upstream: %s"}' % exc).encode()
-            self.send_response(502)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+            conn, resp = self._connect_upstream(body)
+        except Exception as e:  # noqa: BLE001
+            _send_json(self, {"error": {"message": str(e)}}, status=502)
             return
+
+        ctype = resp.getheader("Content-Type") or ""
+        is_stream = "text/event-stream" in ctype or "stream" in ctype
+
         self.send_response(resp.status)
         for key, val in resp.getheaders():
             if key.lower() in ("transfer-encoding", "connection", "keep-alive", "content-length"):
                 continue
             self.send_header(key, val)
+
+        if is_stream:
+            # Streaming: retransmite os chunks à medida que chegam do gateway.
+            self.send_header("Connection", "close")
+            self.end_headers()
+            try:
+                while True:
+                    chunk = resp.read(1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+            except Exception:
+                pass
+            finally:
+                try:
+                    self.wfile.flush()
+                    self.close_connection = True
+                    conn.close()
+                except Exception:
+                    pass
+            return
+
+        data = resp.read()
+        conn.close()
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
 
     def do_GET(self):
-        if self.path in ("/", ""):
-            payload = b'{"status":"ok","proxy":"hermes-chat-bridge"}'
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+        if self.path == "/profile":
+            _send_json(self, {"name": agent_name(), "model": agent_model()})
             return
-        if self.path.rstrip("/") in ("/profile", "/profiles", "/api/profiles"):
-            info = list_all_profiles()
-            payload = json.dumps(info, ensure_ascii=False).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+        if self.path.rstrip("/") in ("/profiles", "/api/profiles"):
+            _send_json(self, list_all_profiles())
             return
-        self._forward()
+        self._relay()
 
     def do_POST(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(length) if length else None
         if self.path.rstrip("/") == "/profile/select":
-            length = int(self.headers.get("Content-Length") or 0)
-            body = self.rfile.read(length) if length else b"{}"
             try:
-                data = json.loads(body.decode())
+                data = json.loads((body or b"{}").decode())
                 prof = data.get("profile", "default")
                 os.environ["HERMES_PROFILE"] = prof
-                payload = json.dumps({"success": True, "profile": prof}).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-                return
-            except Exception as e:
-                payload = json.dumps({"success": False, "error": str(e)}).encode()
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-                return
-        self._forward()
+                _send_json(self, {"success": True, "profile": prof})
+            except Exception as e:  # noqa: BLE001
+                _send_json(self, {"success": False, "error": str(e)}, status=400)
+            return
+        self._relay(body)
 
-    do_PUT = _forward
-    do_DELETE = _forward
+    do_PUT = do_POST
+    do_DELETE = do_POST
 
-    def log_message(self, *args):
+    def log_message(self, fmt, *args):
         pass
 
+
 if __name__ == "__main__":
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", LISTEN_PORT), Handler)
-    print("hermes-chat bridge em 127.0.0.1:%d -> %d (auth: %s)"
-          % (LISTEN_PORT, UPSTREAM_PORT, "OK" if KEY else "SEM CHAVE!"))
-    server.serve_forever()
+    print(f"hermes_chat_bridge a escutar em {LISTEN[0]}:{LISTEN[1]} -> "
+          f"{GATEWAY_HOST}:{GATEWAY_PORT} (auth: {'OK' if API_KEY else 'SEM CHAVE!'})", flush=True)
+    ThreadingHTTPServer(LISTEN, Handler).serve_forever()
