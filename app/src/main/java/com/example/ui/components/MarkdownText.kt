@@ -4,6 +4,11 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,6 +29,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -41,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -49,9 +58,12 @@ import com.example.ui.theme.CodeBlockBg
 import com.example.ui.theme.GoldAccent
 import com.example.ui.theme.GoldPrimary
 import com.example.ui.theme.NavyBorder
+import com.example.ui.theme.NavyBorderSubtle
+import com.example.ui.theme.NavySurfaceCard
 import com.example.ui.theme.NavySurfaceVariant
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.TextTertiary
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -61,36 +73,150 @@ fun MarkdownMessageView(
     modifier: Modifier = Modifier,
     textColor: Color = TextPrimary
 ) {
-    val blocks = remember(text) { parseMarkdownBlocks(text) }
+    val thoughtData = remember(text) { extractThoughtAndResponse(text) }
 
-    SelectionContainer {
-        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            blocks.forEach { block ->
-                when (block) {
-                    is MarkdownBlock.CodeBlock -> {
-                        CodeBlockCard(language = block.language, code = block.code)
-                    }
-                    is MarkdownBlock.Paragraph -> {
-                        FormattedParagraph(content = block.text, textColor = textColor)
-                    }
-                    is MarkdownBlock.BulletItem -> {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Text(
-                                text = "• ",
-                                color = GoldPrimary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp
-                            )
-                            FormattedParagraph(content = block.text, textColor = textColor)
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Se houver pensamento (<think>...</think>), apresenta dropdown colapsável
+        thoughtData.thought?.let { thoughtText ->
+            ThoughtDropdownCard(thought = thoughtText)
+        }
+
+        // Conteúdo Principal da Resposta
+        val mainText = thoughtData.cleanResponse
+        if (mainText.isNotBlank()) {
+            val blocks = remember(mainText) { parseMarkdownBlocks(mainText) }
+            SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    blocks.forEach { block ->
+                        when (block) {
+                            is MarkdownBlock.CodeBlock -> {
+                                CodeBlockCard(language = block.language, code = block.code)
+                            }
+                            is MarkdownBlock.Paragraph -> {
+                                FormattedParagraph(content = block.text, textColor = textColor)
+                            }
+                            is MarkdownBlock.BulletItem -> {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Text(
+                                        text = "• ",
+                                        color = GoldPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp
+                                    )
+                                    FormattedParagraph(content = block.text, textColor = textColor)
+                                }
+                            }
                         }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+fun ThoughtDropdownCard(
+    thought: String,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(NavySurfaceVariant.copy(alpha = 0.5f))
+            .border(1.dp, NavyBorderSubtle, RoundedCornerShape(8.dp))
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Psychology,
+                        contentDescription = "Pensamento",
+                        tint = GoldAccent,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = if (expanded) "Processo de Pensamento" else "Ver raciocínio...",
+                        color = GoldAccent,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (expanded) "Colapsar" else "Expandir",
+                    tint = GoldAccent,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            AnimatedVisibility(
+                visible = expanded,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(NavySurfaceCard.copy(alpha = 0.8f))
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    SelectionContainer {
+                        Text(
+                            text = thought.trim(),
+                            color = TextTertiary,
+                            fontSize = 12.5.sp,
+                            lineHeight = 18.sp,
+                            fontStyle = FontStyle.Italic,
+                            fontFamily = FontFamily.SansSerif
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+data class ThoughtExtraction(
+    val thought: String?,
+    val cleanResponse: String
+)
+
+fun extractThoughtAndResponse(raw: String): ThoughtExtraction {
+    val thinkOpen = "<think>"
+    val thinkClose = "</think>"
+    val openIdx = raw.indexOf(thinkOpen)
+    if (openIdx != -1) {
+        val closeIdx = raw.indexOf(thinkClose, openIdx + thinkOpen.length)
+        if (closeIdx != -1) {
+            val thought = raw.substring(openIdx + thinkOpen.length, closeIdx).trim()
+            val before = raw.substring(0, openIdx).trim()
+            val after = raw.substring(closeIdx + thinkClose.length).trim()
+            val clean = if (before.isNotEmpty() && after.isNotEmpty()) "$before\n\n$after" else "$before$after"
+            return ThoughtExtraction(thought = thought, cleanResponse = clean)
+        } else {
+            // Em streaming ainda não fechou </think>
+            val thought = raw.substring(openIdx + thinkOpen.length).trim()
+            val before = raw.substring(0, openIdx).trim()
+            return ThoughtExtraction(thought = thought, cleanResponse = before)
+        }
+    }
+    return ThoughtExtraction(thought = null, cleanResponse = raw)
 }
 
 @Composable

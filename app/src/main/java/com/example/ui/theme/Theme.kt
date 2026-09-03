@@ -69,7 +69,7 @@ private val HermesLightColorScheme = darkColorScheme(
 @Composable
 fun HermesChatTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    uiDensityScale: Float = 0.90f,
+    uiDensityScale: Float = 1.0f,
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) HermesDarkColorScheme else HermesDarkColorScheme
@@ -105,7 +105,7 @@ fun HermesChatTheme(
 @Composable
 fun HermesTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    uiDensityScale: Float = 0.90f,
+    uiDensityScale: Float = 1.0f,
     content: @Composable () -> Unit
 ) {
     HermesChatTheme(darkTheme = darkTheme, uiDensityScale = uiDensityScale, content = content)

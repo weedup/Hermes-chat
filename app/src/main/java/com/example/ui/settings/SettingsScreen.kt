@@ -115,47 +115,47 @@ fun SettingsScreen(
             .navigationBarsPadding()
             .imePadding()
     ) {
-        // Header
-        Surface(
-            color = NavyDeep,
-            modifier = Modifier.fillMaxWidth(),
-            border = BorderStroke(1.dp, NavyBorder.copy(alpha = 0.5f))
+        // Top Bar - Minimalist and elegant
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
+            IconButton(
+                onClick = {
+                    viewModel.hapticHelper.trigger(HapticHelper.HapticType.CLICK, settings.hapticEnabled)
+                    onNavigateBack()
+                },
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(NavySurfaceVariant.copy(alpha = 0.6f))
+                    .border(1.dp, NavyBorder, CircleShape)
+                    .testTag("back_button")
             ) {
-                IconButton(
-                    onClick = {
-                        viewModel.hapticHelper.trigger(HapticHelper.HapticType.CLICK, settings.hapticEnabled)
-                        onNavigateBack()
-                    },
-                    modifier = Modifier.testTag("back_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Voltar",
-                        tint = GoldPrimary
-                    )
-                }
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Voltar",
+                    tint = GoldPrimary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
 
-                Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(14.dp))
 
-                Column {
-                    Text(
-                        text = "Definições do Hermes",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                    Text(
-                        text = "Configuração de Rede e Servidor Termux",
-                        fontSize = 12.sp,
-                        color = TextSecondary
-                    )
-                }
+            Column {
+                Text(
+                    text = "Definições",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+                Text(
+                    text = "Rede Termux & Parâmetros",
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
             }
         }
 
