@@ -49,8 +49,9 @@ class HermesApiClient {
     }
 
     private val client = HttpClient(OkHttp) {
-        // SSE: sem ContentNegotiation/buffering no caminho do streaming.
-        // OkHttp precisa de saber que a resposta chega em chunks (event-stream).
+        install(ContentNegotiation) {
+            json(jsonConfig)
+        }
         engine {
             config {
                 retryOnConnectionFailure(true)
