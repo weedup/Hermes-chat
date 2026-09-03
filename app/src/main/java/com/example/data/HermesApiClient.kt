@@ -251,7 +251,7 @@ class HermesApiClient {
         temperature: Float,
         maxTokens: Int,
         customEndpoint: String = "AUTO"
-    ): Result<Pair<String, Long>> = withContext(Dispatchers.IO) {
+    ): Result<Triple<String, Long, String?>> = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl).removeSuffix("/")
         val startTime = System.currentTimeMillis()
 
@@ -380,7 +380,7 @@ class HermesApiClient {
                         val replyText = fullReply.toString()
                         if (replyText.isNotBlank()) {
                             val latency = System.currentTimeMillis() - startTime
-                            return@withContext Result.success(Pair(replyText, latency))
+                            return@withContext Result.success(Triple(replyText, latency, reasoningBuf.toString()))
                         }
                     }
                 }

@@ -374,16 +374,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _isGenerating.value = false
 
             if (result.isSuccess) {
-                val (reply, latency) = result.getOrThrow()
+                val (reply, latency, reasoning) = result.getOrThrow()
                 _liveThinking.value = null
                 _liveToolUse.value = null
                 _finalThinking.value = null
                 val completedMsg = pendingHermesMsg.copy(
                     text = if (accumulatedText.isNotBlank()) accumulatedText else reply,
                     status = MessageStatus.SENT,
-                    latencyMs = latency
+                    latencyMs = latency,
+                    reasoning = reasoning?.takeIf { it.isNotBlank() }
                 )
                 repository.updateMessage(completedMsg)
+
+                // Mostrar pensamento final depois da resposta
+                if (!reasoning.isNullOrBlank()) {
+                    _finalThinking.value = reasoning
+                }
 
                 if (currentSettings.hapticEnabled) {
                     hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
