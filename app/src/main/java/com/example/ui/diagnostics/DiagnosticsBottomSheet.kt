@@ -40,6 +40,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.ServerHealth
+import com.example.data.DashboardStatusDto
+import com.example.data.SessionSummary
+import com.example.data.AnalyticsResponse
 import com.example.ui.components.CodeBlockCard
 import com.example.ui.theme.GoldAccent
 import com.example.ui.theme.GoldContainer
@@ -60,7 +63,11 @@ fun DiagnosticsBottomSheet(
     serverUrl: String,
     onDismiss: () -> Unit,
     onRecheck: () -> Unit,
-    sheetState: SheetState
+    sheetState: SheetState,
+    dashStatus: DashboardStatusDto? = null,
+    dashSessions: List<SessionSummary> = emptyList(),
+    dashAnalytics: AnalyticsResponse? = null,
+    onRefreshTelemetry: () -> Unit = {}
 ) {
     val isOnline = serverHealth?.isReachable == true
 
@@ -160,6 +167,91 @@ fun DiagnosticsBottomSheet(
                 }
             }
 
+            // ---- Dashboard Telemetry Card ----
+            Surface(
+                color = NavySurfaceCard,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, NavyBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Telemetria do Dashboard",
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary,
+                            fontSize = 13.5.sp
+                        )
+                        IconButton(onClick = onRefreshTelemetry, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Atualizar telemetria", tint = GoldAccent, modifier = Modifier.size(16.dp))
+                        }
+                    }
+
+                    if (dashStatus != null) {
+                        TelemetryRow(
+                            label = "Agente",
+                            value = "v${dashStatus.version} · ${dashStatus.overall.uppercase()}"
+                        )
+                        TelemetryRow(
+                            label = "Gateway",
+                            value = dashStatus.gatewayState,
+                            valueColor = if (dashStatus.gatewayRunning) StatusOnline else StatusOffline
+                        )
+                        TelemetryRow(
+                            label = "Sessões ativas",
+                            value = "${dashStatus.activeSessions}"
+                        )
+                        val dash = dashStatus.dashboard
+                        if (dash != null) {
+                            TelemetryRow(
+                                label = "Dashboard",
+                                value = "${dash.status} · ${dash.recentUnhandledErrors} erros",
+                                valueColor = if (dash.recentUnhandledErrors > 0) StatusOffline else StatusOnline
+                            )
+                        }
+                    }
+
+                    if (dashAnalytics != null) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text("Consumo (30 dias)", fontWeight = FontWeight.SemiBold, color = TextSecondary, fontSize = 12.sp)
+                        TelemetryRow(label = "Input tokens", value = formatCount(dashAnalytics.totals.totalInput), isCode = true)
+                        TelemetryRow(label = "Output tokens", value = formatCount(dashAnalytics.totals.totalOutput), isCode = true)
+                        TelemetryRow(label = "Cache lida", value = formatCount(dashAnalytics.totals.totalCacheRead), isCode = true)
+                        TelemetryRow(label = "Sessões", value = "${dashAnalytics.totals.totalSessions}")
+                        TelemetryRow(label = "Chamadas API", value = "${dashAnalytics.totals.totalApiCalls}")
+                    }
+
+                    if (dashSessions.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text("Sessões recentes (${dashSessions.size})", fontWeight = FontWeight.SemiBold, color = TextSecondary, fontSize = 12.sp)
+                        dashSessions.take(5).forEach { s ->
+                            val src = s.source.ifBlank { "—" }
+                            Text(
+                                text = "$src · ${s.messageCount} msgs · ${s.model.substringBefore('/')}",
+                                color = TextSecondary,
+                                fontSize = 11.5.sp,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    if (dashStatus == null && dashAnalytics == null && dashSessions.isEmpty()) {
+                        Text(
+                            text = "Nenhum dado do dashboard. Toca em ▶ para carregar.",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+
             // Termux Command Assistance
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -215,4 +307,34 @@ private fun DiagnosticRow(
             fontFamily = if (isCode) FontFamily.Monospace else FontFamily.Default
         )
     }
+}
+
+@Composable
+private fun TelemetryRow(
+    label: String,
+    value: String,
+    valueColor: Color = TextPrimary,
+    isCode: Boolean = false
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, color = TextSecondary, fontSize = 12.sp)
+        Text(
+            text = value,
+            color = valueColor,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            fontFamily = if (isCode) FontFamily.Monospace else FontFamily.Default
+        )
+    }
+}
+
+private fun formatCount(value: Long): String = when {
+    value >= 1_000_000_000 -> "%.1f B".format(value / 1_000_000_000.0)
+    value >= 1_000_000 -> "%.1f M".format(value / 1_000_000.0)
+    value >= 1_000 -> "%.1f k".format(value / 1_000.0)
+    else -> value.toString()
 }

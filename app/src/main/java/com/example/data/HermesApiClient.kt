@@ -559,6 +559,46 @@ class HermesApiClient {
         return@withContext results
     }
 
+    suspend fun fetchDashboardStatus(baseUrl: String): DashboardStatusDto? = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl).removeSuffix("/")
+        try {
+            val response: HttpResponse = client.get("$normalized/dashboard/status") {
+                timeout { requestTimeoutMillis = 8_000; connectTimeoutMillis = 5_000 }
+            }
+            if (response.status.isSuccess()) {
+                return@withContext jsonConfig.decodeFromString<DashboardStatusDto>(response.bodyAsText())
+            }
+        } catch (_: Exception) {}
+        return@withContext null
+    }
+
+    suspend fun fetchDashboardSessions(baseUrl: String): List<SessionSummary> = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl).removeSuffix("/")
+        try {
+            val response: HttpResponse = client.get("$normalized/dashboard/sessions") {
+                timeout { requestTimeoutMillis = 8_000; connectTimeoutMillis = 5_000 }
+            }
+            if (response.status.isSuccess()) {
+                val dto = jsonConfig.decodeFromString<SessionsResponse>(response.bodyAsText())
+                return@withContext dto.sessions
+            }
+        } catch (_: Exception) {}
+        return@withContext emptyList()
+    }
+
+    suspend fun fetchDashboardAnalytics(baseUrl: String): AnalyticsResponse? = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl).removeSuffix("/")
+        try {
+            val response: HttpResponse = client.get("$normalized/dashboard/analytics") {
+                timeout { requestTimeoutMillis = 8_000; connectTimeoutMillis = 5_000 }
+            }
+            if (response.status.isSuccess()) {
+                return@withContext jsonConfig.decodeFromString<AnalyticsResponse>(response.bodyAsText())
+            }
+        } catch (_: Exception) {}
+        return@withContext null
+    }
+
     suspend fun fetchModels(baseUrl: String): List<String> = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl)
         val endpoint = "${normalized.removeSuffix("/")}/v1/models"

@@ -151,3 +151,62 @@ data class ModelsListResponse(
 data class ModelItem(
     val id: String
 )
+
+// ---- Dashboard telemetry DTOs (proxy /dashboard/* na ponte 9120) ----
+
+@Serializable
+data class DashboardStatusDto(
+    val version: String = "",
+    @SerialName("gateway_running") val gatewayRunning: Boolean = false,
+    @SerialName("gateway_state") val gatewayState: String = "",
+    @SerialName("active_sessions") val activeSessions: Int = 0,
+    @SerialName("overall") val overall: String = "",
+    @SerialName("dashboard") val dashboard: DashboardComponentDto? = null
+)
+
+@Serializable
+data class DashboardComponentDto(
+    val status: String = "",
+    @SerialName("recent_unhandled_errors") val recentUnhandledErrors: Int = 0
+)
+
+@Serializable
+data class SessionSummary(
+    val id: String = "",
+    val source: String = "",
+    val model: String = "",
+    @SerialName("message_count") val messageCount: Int = 0,
+    @SerialName("tool_call_count") val toolCallCount: Int = 0,
+    @SerialName("started_at") val startedAt: Double = 0.0,
+    @SerialName("display_name") val displayName: String? = null
+)
+
+@Serializable
+data class SessionsResponse(
+    val sessions: List<SessionSummary> = emptyList()
+)
+
+@Serializable
+data class UsageTotals(
+    @SerialName("total_input") val totalInput: Long = 0,
+    @SerialName("total_output") val totalOutput: Long = 0,
+    @SerialName("total_cache_read") val totalCacheRead: Long = 0,
+    @SerialName("total_sessions") val totalSessions: Int = 0,
+    @SerialName("total_api_calls") val totalApiCalls: Int = 0,
+    @SerialName("total_estimated_cost") val totalEstimatedCost: Double = 0.0
+)
+
+@Serializable
+data class DailyUsage(
+    val day: String = "",
+    @SerialName("input_tokens") val inputTokens: Long = 0,
+    @SerialName("output_tokens") val outputTokens: Long = 0,
+    @SerialName("sessions") val sessions: Int = 0,
+    @SerialName("api_calls") val apiCalls: Int = 0
+)
+
+@Serializable
+data class AnalyticsResponse(
+    val totals: UsageTotals = UsageTotals(),
+    val daily: List<DailyUsage> = emptyList()
+)

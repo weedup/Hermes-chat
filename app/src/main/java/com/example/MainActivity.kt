@@ -71,6 +71,9 @@ fun HermesChatApp(
 
     val serverHealth by chatViewModel.serverHealth.collectAsState()
     val settings by chatViewModel.settings.collectAsState()
+    val dashStatus by chatViewModel.dashStatus.collectAsState()
+    val dashSessions by chatViewModel.dashSessions.collectAsState()
+    val dashAnalytics by chatViewModel.dashAnalytics.collectAsState()
 
     val context = LocalContext.current
     var lastBackPressTime by remember { mutableStateOf(0L) }
@@ -117,6 +120,7 @@ fun HermesChatApp(
                     },
                     onOpenDiagnostics = {
                         showDiagnostics = true
+                        chatViewModel.refreshDashboardTelemetry()
                     },
                     modifier = Modifier.fillMaxSize()
                 )
@@ -141,6 +145,10 @@ fun HermesChatApp(
             serverHealth = serverHealth,
             serverUrl = settings.serverUrl,
             sheetState = sheetState,
+            dashStatus = dashStatus,
+            dashSessions = dashSessions,
+            dashAnalytics = dashAnalytics,
+            onRefreshTelemetry = { chatViewModel.refreshDashboardTelemetry() },
             onDismiss = {
                 coroutineScope.launch { sheetState.hide() }
                 showDiagnostics = false

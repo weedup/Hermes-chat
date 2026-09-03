@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.ChatMessage
 import com.example.data.ChatRepository
 import com.example.data.ChatSession
+import com.example.data.DashboardStatusDto
 import com.example.data.HermesApiClient
 import com.example.data.HermesSettings
 import com.example.data.MessageSender
@@ -13,6 +14,8 @@ import com.example.data.MessageStatus
 import com.example.data.PreferencesManager
 import com.example.data.ProfileDto
 import com.example.data.ServerHealth
+import com.example.data.SessionSummary
+import com.example.data.AnalyticsResponse
 import com.example.util.HapticHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -81,6 +84,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _serverHealth = MutableStateFlow<ServerHealth?>(null)
     val serverHealth: StateFlow<ServerHealth?> = _serverHealth.asStateFlow()
+
+    private val _dashStatus = MutableStateFlow<DashboardStatusDto?>(null)
+    val dashStatus: StateFlow<DashboardStatusDto?> = _dashStatus.asStateFlow()
+
+    private val _dashSessions = MutableStateFlow<List<SessionSummary>>(emptyList())
+    val dashSessions: StateFlow<List<SessionSummary>> = _dashSessions.asStateFlow()
+
+    private val _dashAnalytics = MutableStateFlow<AnalyticsResponse?>(null)
+    val dashAnalytics: StateFlow<AnalyticsResponse?> = _dashAnalytics.asStateFlow()
+
+    private val _dashLoading = MutableStateFlow(false)
+    val dashLoading: StateFlow<Boolean> = _dashLoading.asStateFlow()
+
+    private val _dashError = MutableStateFlow<String?>(null)
+    val dashError: StateFlow<String?> = _dashError.asStateFlow()
 
     private val _isSPenHovering = MutableStateFlow(false)
     val isSPenHovering: StateFlow<Boolean> = _isSPenHovering.asStateFlow()
@@ -198,6 +216,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _serverHealth.value = health
             if (health.isReachable) {
                 refreshProfileInfo()
+            }
+        }
+    }
+
+    /** Puxa a telemetria do dashboard (status, sessões, analytics) pela ponte 9120. */
+    fun refreshDashboardTelemetry() {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (_dashLoading.value) return@launch
+            _dashLoading.value = true
+            _dashError.value = null
+            val url = settings.value.serverUrl
+            try {
+                _dashStatus.value = apiClient.fetchDashboardStatus(url)
+                _dashSessions.value = apiClient.fetchDashboardSessions(url)
+                _dashAnalytics.value = apiClient.fetchDashboardAnalytics(url)
+                if (_dashStatus.value == null && _dashSessions.value.isEmpty() && _dashAnalytics.value == null) {
+                    _dashError.value = "Ponte/dashboard indisponível — verifica se a ponte 9120 e o dashboard 9119 estão a correr."
+                }
+            } catch (e: Exception) {
+                _dashError.value = e.localizedMessage ?: "Erro a ler telemetria do dashboard"
+            } finally {
+                _dashLoading.value = false
             }
         }
     }

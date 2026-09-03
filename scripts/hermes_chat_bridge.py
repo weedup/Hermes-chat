@@ -7,12 +7,67 @@ import http.client
 import json
 import os
 import re
+import urllib.request
+import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERMES_HOME = "/root/.hermes"
 GATEWAY_HOST = "127.0.0.1"
 GATEWAY_PORT = 8642
 LISTEN = ("127.0.0.1", 9120)
+
+# Dashboard Hermes (admin surface): 9119 em loopback. /api/status é público;
+# os endpoints sensíveis (sessions, cron, skills, analytics…) exigem o token de
+# sessão efémero que o SPA recebe via window.__HERMES_SESSION_TOKEN__ em `/`.
+DASHBOARD_HOST = "127.0.0.1"
+DASHBOARD_PORT = 9119
+_DASH_TOKEN_CACHE = {"token": None, "ts": 0.0}
+
+
+def _dashboard_token():
+    """Busca o token de sessão do dashboard, com cache curta (efémero — morre
+    quando o dashboard reinicia, por isso não se pode confiar numa cache longa)."""
+    now = __import__("time").time()
+    if _DASH_TOKEN_CACHE["token"] and now - _DASH_TOKEN_CACHE["ts"] < 30:
+        return _DASH_TOKEN_CACHE["token"]
+    try:
+        req = urllib.request.Request(
+            f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}/",
+            headers={"User-Agent": "hermes-chat-bridge"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as r:
+            html = r.read().decode("utf-8", "replace")
+        m = re.search(r'__HERMES_SESSION_TOKEN__\s*=\s*"([^"]+)"', html)
+        if not m:
+            return None
+        _DASH_TOKEN_CACHE["token"] = m.group(1)
+        _DASH_TOKEN_CACHE["ts"] = now
+        return m.group(1)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def dashboard(path, timeout=12):
+    """Proxy sensível para o dashboard. Devolve (status, payload-dict)."""
+    token = _dashboard_token()
+    if not token:
+        return 503, {"error": "dashboard_token_unavailable",
+                     "detail": "Não consegui autenticar no dashboard (9119)."}
+    try:
+        req = urllib.request.Request(
+            f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}{path}",
+            headers={"X-Hermes-Session-Token": token,
+                     "User-Agent": "hermes-chat-bridge"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode("utf-8", "replace"))
+        except Exception:  # noqa: BLE001
+            return e.code, {"detail": str(e)}
+    except Exception as e:  # noqa: BLE001
+        return 502, {"error": "dashboard_unreachable", "detail": str(e)}
 
 
 def load_api_key():
@@ -173,6 +228,22 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.rstrip("/") in ("/profiles", "/api/profiles"):
             _send_json(self, list_all_profiles())
             return
+
+        # Rotas de telemetria do dashboard Hermes (proxy autenticado).
+        # A app chama /dashboard/<rota>; expoem-se só as read-only úteis.
+        if self.path.rstrip("/") == "/dashboard/status":
+            st, payload = dashboard("/api/status", timeout=8)
+            _send_json(self, payload, status=st)
+            return
+        if self.path.rstrip("/") == "/dashboard/sessions":
+            st, payload = dashboard("/api/sessions?limit=20")
+            _send_json(self, payload, status=st)
+            return
+        if self.path.rstrip("/") == "/dashboard/analytics":
+            st, payload = dashboard("/api/analytics/usage?days=30")
+            _send_json(self, payload, status=st)
+            return
+
         self._relay()
 
     def do_POST(self):
