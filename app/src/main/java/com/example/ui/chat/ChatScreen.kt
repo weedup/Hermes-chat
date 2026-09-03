@@ -46,6 +46,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
@@ -162,7 +163,17 @@ fun ChatScreen(
 
     val listState = rememberLazyListState()
     var showClearDialog by remember { mutableStateOf(false) }
+    var showProfileDialog by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+
+    // Abre o dialog de perfis quando o ViewModel pede (chip /profile ou comando escrito)
+    val profileDialogEvent by viewModel.profileDialogEvent.collectAsState()
+    LaunchedEffect(profileDialogEvent) {
+        if (profileDialogEvent > 0) {
+            viewModel.refreshProfileInfo()
+            showProfileDialog = true
+        }
+    }
 
     LaunchedEffect(messages.size, isGenerating) {
         if (messages.isNotEmpty()) {
@@ -366,6 +377,15 @@ fun ChatScreen(
                             }
                         )
                         DropdownMenuItem(
+                            text = { Text("Mudar Perfil / Agente", color = TextPrimary) },
+                            leadingIcon = { Icon(Icons.Default.Person, null, tint = GoldAccent) },
+                            onClick = {
+                                showMenu = false
+                                viewModel.refreshProfileInfo()
+                                showProfileDialog = true
+                            }
+                        )
+                        DropdownMenuItem(
                             text = { Text("Definições do Servidor", color = TextPrimary) },
                             leadingIcon = { Icon(Icons.Default.Settings, null, tint = GoldAccent) },
                             onClick = {
@@ -470,6 +490,101 @@ fun ChatScreen(
             shape = RoundedCornerShape(16.dp)
         )
     }
+
+    if (showProfileDialog) {
+        val profilesToShow = if (availableProfiles.isNotEmpty()) {
+            availableProfiles
+        } else {
+            listOf(
+                ProfileDto(id = "default", name = "Agent T", active = (agentName == null || agentName == "Agent T")),
+                ProfileDto(id = "tara", name = "Tara", active = (agentName == "Tara"))
+            )
+        }
+
+        AlertDialog(
+            onDismissRequest = { showProfileDialog = false },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = null,
+                        tint = GoldPrimary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Text(
+                        text = "Escolher Perfil / Agente",
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    profilesToShow.forEach { prof ->
+                        val isSelected = prof.active || (agentName != null && prof.name.equals(agentName, ignoreCase = true))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSelected) GoldPrimary.copy(alpha = 0.15f) else NavySurfaceVariant)
+                                .border(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) GoldPrimary else NavyBorder,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable {
+                                    viewModel.hapticHelper.trigger(HapticHelper.HapticType.CLICK, settings.hapticEnabled)
+                                    viewModel.switchProfile(prof.id, prof.name)
+                                    showProfileDialog = false
+                                }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = prof.name,
+                                    color = if (isSelected) GoldPrimary else TextPrimary,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 15.sp
+                                )
+                                Text(
+                                    text = "ID: ${prof.id}",
+                                    color = TextTertiary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Ativo",
+                                    tint = GoldPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showProfileDialog = false }) {
+                    Text("Fechar", color = TextSecondary)
+                }
+            },
+            containerColor = NavyDeep,
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
 }
 
 @Composable
@@ -518,7 +633,10 @@ fun ChatTopBar(
                 }
 
                 Column(
-                    modifier = Modifier.clickable { onStatusClick() }
+                    modifier = Modifier.clickable {
+                        onRefreshClick()
+                        onStatusClick()
+                    }
                 ) {
                     Text(
                         text = agentName ?: "Hermes Chat",

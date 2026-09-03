@@ -84,6 +84,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _pendingCount = MutableStateFlow(0)
     val pendingCount: StateFlow<Int> = _pendingCount.asStateFlow()
 
+    // Incrementa sempre que um comando /profile pede o dialog de seleção
+    private val _profileDialogEvent = MutableStateFlow(0)
+    val profileDialogEvent: StateFlow<Int> = _profileDialogEvent.asStateFlow()
+
     private var generateJob: Job? = null
 
     init {
@@ -196,9 +200,66 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Comandos locais (estilo Hermes): resolvidos na app, 0 tokens.
+     * Devolve true se o texto era um comando tratado localmente.
+     */
+    private fun handleLocalCommand(text: String): Boolean {
+        val cmd = text.trim().lowercase()
+        return when {
+            cmd == "/new" -> {
+                createNewSession()
+                true
+            }
+            cmd == "/clear" -> {
+                clearChat()
+                true
+            }
+            cmd == "/stop" -> {
+                stopGeneration()
+                true
+            }
+            cmd == "/profile" -> {
+                _profileDialogEvent.value += 1
+                true
+            }
+            else -> false
+        }
+    }
+
+    /** Aborta a geração em curso, limpa a fila e marca a mensagem pendente como parada. */
+    fun stopGeneration() {
+        generateJob?.cancel()
+        generateJob = null
+        _isGenerating.value = false
+        _pendingQueue.value = emptyList()
+        _pendingCount.value = 0
+        viewModelScope.launch {
+            val pending = messages.value.filter {
+                it.sessionId == _currentSessionId.value &&
+                    (it.status == MessageStatus.SENDING || it.status == MessageStatus.STREAMING)
+            }
+            pending.forEach { msg ->
+                repository.updateMessage(
+                    msg.copy(
+                        text = if (msg.text.isBlank()) "(geração parada)" else msg.text,
+                        status = MessageStatus.ERROR,
+                        errorDetails = "Parada pelo utilizador (/stop)"
+                    )
+                )
+            }
+        }
+    }
+
     fun sendMessage(customPrompt: String? = null) {
         val textToSend = (customPrompt ?: _inputText.value).trim()
         if (textToSend.isBlank()) return
+
+        // Comandos locais correm sempre, mesmo durante geração (exceto os que vão para a fila)
+        if (handleLocalCommand(textToSend)) {
+            if (customPrompt == null) _inputText.value = ""
+            return
+        }
 
         if (_isGenerating.value) {
             _pendingQueue.value = _pendingQueue.value + textToSend
