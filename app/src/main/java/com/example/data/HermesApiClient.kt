@@ -164,7 +164,7 @@ class HermesApiClient {
         return@withContext null
     }
 
-    suspend fun fetchProfilesList(baseUrl: String): ProfileListResponse? = withContext(Dispatchers.IO) {
+    suspend fun fetchProfilesList(baseUrl: String): ProfilesResponse? = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl).removeSuffix("/")
         val candidates = listOf("/profiles", "/api/profiles", "/profile")
         for (path in candidates) {
@@ -181,12 +181,12 @@ class HermesApiClient {
                     val element = jsonConfig.parseToJsonElement(text)
                     if (element is JsonObject) {
                         if (element.containsKey("profiles")) {
-                            return@withContext jsonConfig.decodeFromString<ProfileListResponse>(text)
+                            return@withContext jsonConfig.decodeFromString<ProfilesResponse>(text)
                         } else if (element.containsKey("name") || element.containsKey("profile")) {
                             val name = element["alias"]?.jsonPrimitive?.contentOrNull
                                 ?: element["name"]?.jsonPrimitive?.contentOrNull ?: "Hermes"
                             val prof = element["profile"]?.jsonPrimitive?.contentOrNull ?: "default"
-                            return@withContext ProfileListResponse(
+                            return@withContext ProfilesResponse(
                                 current = prof,
                                 profiles = listOf(
                                     ProfileDto(id = "default", name = if (prof == "default") name else "Agent T", active = (prof == "default")),
@@ -198,7 +198,7 @@ class HermesApiClient {
                 }
             } catch (_: Exception) {}
         }
-        return@withContext ProfileListResponse(
+        return@withContext ProfilesResponse(
             current = "default",
             profiles = listOf(
                 ProfileDto(id = "default", name = "Agent T", active = true),

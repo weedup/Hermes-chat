@@ -1014,6 +1014,7 @@ fun ChatInputBar(
                         keyboardType = KeyboardType.Text,
                         imeAction = ImeAction.Default
                     ),
+                    singleLine = false,
                     maxLines = 4,
                     minLines = 1
                 )
