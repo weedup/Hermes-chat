@@ -1,3 +1,32 @@
+package com.example.ui.chat
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.data.ChatMessage
+import com.example.data.ChatRepository
+import com.example.data.ChatSession
+import com.example.data.HermesApiClient
+import com.example.data.HermesSettings
+import com.example.data.MessageSender
+import com.example.data.MessageStatus
+import com.example.data.PreferencesManager
+import com.example.data.ProfileDto
+import com.example.data.ServerHealth
+import com.example.util.HapticHelper
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import java.util.UUID
+
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = ChatRepository(application)
@@ -348,6 +377,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val (reply, latency) = result.getOrThrow()
                 _liveThinking.value = null
                 _liveToolUse.value = null
+                _finalThinking.value = null
                 val completedMsg = pendingHermesMsg.copy(
                     text = if (accumulatedText.isNotBlank()) accumulatedText else reply,
                     status = MessageStatus.SENT,
