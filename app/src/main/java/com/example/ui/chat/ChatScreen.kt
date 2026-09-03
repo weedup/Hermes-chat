@@ -429,19 +429,6 @@ fun ChatScreen(
                     }
                 )
 
-                // "A pensar..." indicator + fila de mensagens em espera
-                AnimatedVisibility(
-                    visible = isGenerating || pendingCount > 0,
-                    enter = fadeIn() + slideInVertically(),
-                    exit = fadeOut()
-                ) {
-                    ThinkingBar(
-                        isGenerating = isGenerating,
-                        agentName = agentName,
-                        pendingCount = pendingCount
-                    )
-                }
-
                 // Input Bar com Badge Corrigido
                 ChatInputBar(
                     inputText = inputText,
@@ -1020,38 +1007,42 @@ fun ChatInputBar(
                 )
 
                 Box(
-                    modifier = Modifier
-                        .size(46.dp)
-                        .shadow(
-                            elevation = if (inputText.isNotBlank()) 6.dp else 0.dp,
-                            shape = CircleShape,
-                            ambientColor = GoldPrimary,
-                            spotColor = GoldPrimary
-                        )
-                        .clip(CircleShape)
-                        .background(
-                            if (inputText.isNotBlank()) GoldPrimary else NavySurfaceVariant
-                        )
-                        .clickable(enabled = inputText.isNotBlank()) {
-                            hapticHelper.trigger(HapticHelper.HapticType.HEAVY_CLICK, hapticEnabled)
-                            onSend()
-                        }
-                        .testTag("send_message_button")
+                    modifier = Modifier.size(46.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = if (isGenerating) "Enviar (fica em fila)" else "Enviar Mensagem",
-                        tint = if (inputText.isNotBlank()) NavyDeep else TextTertiary,
+                    Box(
                         modifier = Modifier
-                            .size(18.dp)
-                            .align(Alignment.Center)
-                    )
+                            .fillMaxSize()
+                            .shadow(
+                                elevation = if (inputText.isNotBlank()) 6.dp else 0.dp,
+                                shape = CircleShape,
+                                ambientColor = GoldPrimary,
+                                spotColor = GoldPrimary
+                            )
+                            .clip(CircleShape)
+                            .background(
+                                if (inputText.isNotBlank()) GoldPrimary else NavySurfaceVariant
+                            )
+                            .clickable(enabled = inputText.isNotBlank()) {
+                                hapticHelper.trigger(HapticHelper.HapticType.HEAVY_CLICK, hapticEnabled)
+                                onSend()
+                            }
+                            .testTag("send_message_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Send,
+                            contentDescription = if (isGenerating) "Enviar (fica em fila)" else "Enviar Mensagem",
+                            tint = if (inputText.isNotBlank()) NavyDeep else TextTertiary,
+                            modifier = Modifier
+                                .size(18.dp)
+                                .align(Alignment.Center)
+                        )
+                    }
 
                     if (pendingCount > 0) {
                         Box(
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
-                                .offset(x = 2.dp, y = (-2).dp)
+                                .offset(x = 4.dp, y = (-4).dp)
                                 .size(20.dp)
                                 .clip(CircleShape)
                                 .background(NavyDeep)
