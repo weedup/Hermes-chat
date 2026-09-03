@@ -385,15 +385,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 repository.updateMessage(completedMsg)
 
-                // Fetch reasoning from the persisted message after completion
-                viewModelScope.launch(Dispatchers.IO) {
-                    val allMsgs = repository.getMessagesForSession(currentSId).first()
-                    val hermesMsg = allMsgs.lastOrNull { it.sender == MessageSender.HERMES }
-                    if (hermesMsg != null && !hermesMsg.reasoning.isNullOrBlank()) {
-                        viewModelScope.launch { _finalThinking.value = hermesMsg.reasoning }
-                    }
-                }
-
                 if (currentSettings.hapticEnabled) {
                     hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
                 }

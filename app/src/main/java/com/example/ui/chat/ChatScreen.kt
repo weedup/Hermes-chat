@@ -458,14 +458,14 @@ fun ChatScreen(
                 val liveThinking by viewModel.liveThinking.collectAsState()
                 val liveToolUse by viewModel.liveToolUse.collectAsState()
                 val finalThinking by viewModel.finalThinking.collectAsState()
-                if (isGenerating && (!liveThinking.isNullOrBlank() || !liveToolUse.isNullOrBlank())) {\
+                if (isGenerating && (!liveThinking.isNullOrBlank() || !liveToolUse.isNullOrBlank())) {
                     LiveStatusPanel(
                         thinking = liveThinking?.takeLast(600),
                         toolUse = liveToolUse
                     )
                 } else if (!isGenerating && !finalThinking.isNullOrBlank()) {
                     LiveStatusPanel(
-                        thinking = finalThinking.takeLast(1000),
+                        thinking = finalThinking?.takeLast(1000),
                         toolUse = null
                     )
                 }
