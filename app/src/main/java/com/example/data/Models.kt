@@ -58,7 +58,8 @@ data class HermesSettings(
     val temperature: Float = 0.7f,
     val maxTokens: Int = 2048,
     val hapticEnabled: Boolean = true,
-    val sPenModeEnabled: Boolean = true
+    val sPenModeEnabled: Boolean = true,
+    val uiDensityScale: Float = 0.90f
 )
 
 data class EndpointProbeResult(

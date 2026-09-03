@@ -47,7 +47,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            HermesChatTheme {
+            val settings by chatViewModel.settings.collectAsState()
+            HermesChatTheme(uiDensityScale = settings.uiDensityScale) {
                 HermesChatApp(
                     chatViewModel = chatViewModel,
                     settingsViewModel = settingsViewModel

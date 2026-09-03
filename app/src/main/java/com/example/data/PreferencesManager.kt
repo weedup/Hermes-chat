@@ -23,6 +23,7 @@ class PreferencesManager(private val context: Context) {
         val KEY_MAX_TOKENS = intPreferencesKey("max_tokens")
         val KEY_HAPTIC_ENABLED = booleanPreferencesKey("haptic_enabled")
         val KEY_SPEN_MODE = booleanPreferencesKey("spen_mode_enabled")
+        val KEY_UI_DENSITY_SCALE = floatPreferencesKey("ui_density_scale")
 
         const val DEFAULT_SERVER_URL = "http://127.0.0.1:9120/"
         const val DEFAULT_CUSTOM_ENDPOINT = "AUTO"
@@ -30,6 +31,7 @@ class PreferencesManager(private val context: Context) {
         const val DEFAULT_SYSTEM_PROMPT = "Tu és o Hermes, um modelo de inteligência artificial de elite a correr localmente no dispositivo via Termux."
         const val DEFAULT_TEMPERATURE = 0.7f
         const val DEFAULT_MAX_TOKENS = 2048
+        const val DEFAULT_UI_DENSITY_SCALE = 0.90f
     }
 
     val settingsFlow: Flow<HermesSettings> = context.dataStore.data.map { preferences ->
@@ -41,7 +43,8 @@ class PreferencesManager(private val context: Context) {
             temperature = preferences[KEY_TEMPERATURE] ?: DEFAULT_TEMPERATURE,
             maxTokens = preferences[KEY_MAX_TOKENS] ?: DEFAULT_MAX_TOKENS,
             hapticEnabled = preferences[KEY_HAPTIC_ENABLED] ?: true,
-            sPenModeEnabled = preferences[KEY_SPEN_MODE] ?: true
+            sPenModeEnabled = preferences[KEY_SPEN_MODE] ?: true,
+            uiDensityScale = preferences[KEY_UI_DENSITY_SCALE] ?: DEFAULT_UI_DENSITY_SCALE
         )
     }
 
@@ -93,6 +96,12 @@ class PreferencesManager(private val context: Context) {
         }
     }
 
+    suspend fun updateUiDensityScale(scale: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_UI_DENSITY_SCALE] = scale
+        }
+    }
+
     suspend fun resetDefaults() {
         context.dataStore.edit { preferences ->
             preferences[KEY_SERVER_URL] = DEFAULT_SERVER_URL
@@ -102,6 +111,7 @@ class PreferencesManager(private val context: Context) {
             preferences[KEY_MAX_TOKENS] = DEFAULT_MAX_TOKENS
             preferences[KEY_HAPTIC_ENABLED] = true
             preferences[KEY_SPEN_MODE] = true
+            preferences[KEY_UI_DENSITY_SCALE] = DEFAULT_UI_DENSITY_SCALE
         }
     }
 }

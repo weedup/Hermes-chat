@@ -111,6 +111,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun updateUiDensityScale(scale: Float) {
+        viewModelScope.launch {
+            preferencesManager.updateUiDensityScale(scale)
+            if (settings.value.hapticEnabled) {
+                hapticHelper.trigger(HapticHelper.HapticType.LIGHT_TICK)
+            }
+        }
+    }
+
     fun resetToDefaults() {
         viewModelScope.launch {
             preferencesManager.resetDefaults()

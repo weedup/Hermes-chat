@@ -601,7 +601,121 @@ fun SettingsScreen(
                 )
             }
 
-            // Section 3: Reset Actions
+            // Section 3: Appearance, DPI & Haptics
+            SettingsSectionCard(
+                title = "Aparência, Resolução (DPI) & Háptica",
+                icon = Icons.Default.DisplaySettings
+            ) {
+                Text(
+                    text = "Densidade da Interface (DPI):",
+                    fontSize = 13.sp,
+                    color = TextSecondary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Ajusta a escala dos elementos gráficos para um aspeto mais nítido, elegante e moderno.",
+                    fontSize = 11.5.sp,
+                    color = TextTertiary
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Density scale selector chips
+                val densityOptions = listOf(
+                    Triple("0.88x", "Alta Resolução", 0.88f),
+                    Triple("0.94x", "Equilibrada", 0.94f),
+                    Triple("1.00x", "Padrão", 1.00f)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    densityOptions.forEach { (label, desc, scale) ->
+                        val isSelected = kotlin.math.abs(settings.uiDensityScale - scale) < 0.03f
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    viewModel.updateUiDensityScale(scale)
+                                },
+                            color = if (isSelected) GoldPrimary.copy(alpha = 0.15f) else NavySurfaceVariant.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(
+                                1.dp,
+                                if (isSelected) GoldPrimary else NavyBorder
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) GoldPrimary else TextPrimary
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = desc,
+                                    fontSize = 10.5.sp,
+                                    color = if (isSelected) GoldAccent else TextSecondary,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Haptic feedback toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Vibration,
+                                contentDescription = null,
+                                tint = GoldAccent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Vibração ao Interagir na App",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = "Ativa feedback tátil em botões e envios. (A vibração ao escrever no teclado é controlada pelo sistema do telemóvel).",
+                            fontSize = 11.5.sp,
+                            color = TextTertiary
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Switch(
+                        checked = settings.hapticEnabled,
+                        onCheckedChange = { viewModel.updateHapticEnabled(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = NavyDeep,
+                            checkedTrackColor = GoldPrimary,
+                            uncheckedThumbColor = TextSecondary,
+                            uncheckedTrackColor = NavySurfaceVariant
+                        )
+                    )
+                }
+            }
+
+            // Section 4: Reset Actions
             OutlinedButton(
                 onClick = {
                     viewModel.resetToDefaults()

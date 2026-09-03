@@ -8,9 +8,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Density
 import androidx.core.view.WindowCompat
 
 private fun Context.findActivity(): Activity? {
@@ -65,6 +69,7 @@ private val HermesLightColorScheme = darkColorScheme(
 @Composable
 fun HermesChatTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    uiDensityScale: Float = 0.90f,
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) HermesDarkColorScheme else HermesDarkColorScheme
@@ -80,18 +85,29 @@ fun HermesChatTheme(
         }
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+    val currentDensity = LocalDensity.current
+    val customDensity = remember(currentDensity.density, currentDensity.fontScale, uiDensityScale) {
+        Density(
+            density = currentDensity.density * uiDensityScale,
+            fontScale = currentDensity.fontScale * uiDensityScale
+        )
+    }
+
+    CompositionLocalProvider(LocalDensity provides customDensity) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = Typography,
+            content = content
+        )
+    }
 }
 
 @Composable
 fun HermesTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    uiDensityScale: Float = 0.90f,
     content: @Composable () -> Unit
 ) {
-    HermesChatTheme(darkTheme = darkTheme, content = content)
+    HermesChatTheme(darkTheme = darkTheme, uiDensityScale = uiDensityScale, content = content)
 }
 

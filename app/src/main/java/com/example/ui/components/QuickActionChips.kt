@@ -88,29 +88,29 @@ fun QuickPromptRow(
         modifier = modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 6.dp),
+            .padding(horizontal = 16.dp, vertical = 5.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         unifiedQuickItems.forEach { item ->
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .background(NavySurfaceCard)
-                    .border(1.dp, if (item.isCommand) GoldPrimary.copy(alpha = 0.5f) else NavyBorder, RoundedCornerShape(16.dp))
+                    .border(1.dp, NavyBorder, RoundedCornerShape(14.dp))
                     .clickable { onPromptSelected(item.prompt) }
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                    .padding(horizontal = 11.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = item.icon,
                     contentDescription = null,
-                    tint = if (item.isCommand) GoldPrimary else GoldAccent,
-                    modifier = Modifier.size(14.dp)
+                    tint = GoldAccent,
+                    modifier = Modifier.size(13.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = item.title,
-                    color = if (item.isCommand) GoldPrimary else TextPrimary,
+                    color = TextPrimary,
                     fontSize = 12.sp
                 )
             }

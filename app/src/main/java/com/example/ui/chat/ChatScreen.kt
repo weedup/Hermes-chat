@@ -964,9 +964,6 @@ fun ChatInputBar(
                 OutlinedTextField(
                     value = inputText,
                     onValueChange = { newText ->
-                        if (hapticEnabled && newText.length != inputText.length) {
-                            hapticHelper.trigger(HapticHelper.HapticType.KEYPRESS)
-                        }
                         onTextChanged(newText)
                     },
                     placeholder = {
