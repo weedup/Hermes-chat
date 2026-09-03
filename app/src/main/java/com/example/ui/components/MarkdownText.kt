@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -71,18 +72,24 @@ import kotlinx.coroutines.launch
 fun MarkdownMessageView(
     text: String,
     modifier: Modifier = Modifier,
-    textColor: Color = TextPrimary
+    textColor: Color = TextPrimary,
+    reasoning: String? = null,
+    isStreaming: Boolean = false
 ) {
     val thoughtData = remember(text) { extractThoughtAndResponse(text) }
+    val effectiveThought = reasoning?.takeIf { it.isNotBlank() } ?: thoughtData.thought
+    val mainText = if (reasoning != null && reasoning.isNotBlank()) text else thoughtData.cleanResponse
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // Se houver pensamento (<think>...</think>), apresenta dropdown colapsável
-        thoughtData.thought?.let { thoughtText ->
-            ThoughtDropdownCard(thought = thoughtText)
+        // Se houver pensamento, apresenta dropdown colapsável
+        effectiveThought?.let { thoughtText ->
+            ThoughtDropdownCard(
+                thought = thoughtText,
+                isStreaming = isStreaming && mainText.isBlank()
+            )
         }
 
         // Conteúdo Principal da Resposta
-        val mainText = thoughtData.cleanResponse
         if (mainText.isNotBlank()) {
             val blocks = remember(mainText) { parseMarkdownBlocks(mainText) }
             SelectionContainer {
@@ -120,22 +127,28 @@ fun MarkdownMessageView(
 @Composable
 fun ThoughtDropdownCard(
     thought: String,
+    isStreaming: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    var userToggled by remember { mutableStateOf<Boolean?>(null) }
+    val expanded = userToggled ?: if (isStreaming) true else false
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(NavySurfaceVariant.copy(alpha = 0.5f))
-            .border(1.dp, NavyBorderSubtle, RoundedCornerShape(8.dp))
+            .border(
+                1.dp,
+                if (isStreaming) GoldPrimary.copy(alpha = 0.6f) else NavyBorderSubtle,
+                RoundedCornerShape(8.dp)
+            )
     ) {
         Column {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { expanded = !expanded }
+                    .clickable { userToggled = !expanded }
                     .padding(horizontal = 10.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -147,15 +160,22 @@ fun ThoughtDropdownCard(
                     Icon(
                         imageVector = Icons.Default.Psychology,
                         contentDescription = "Pensamento",
-                        tint = GoldAccent,
+                        tint = if (isStreaming) GoldPrimary else GoldAccent,
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
-                        text = if (expanded) "Processo de Pensamento" else "Ver raciocínio...",
-                        color = GoldAccent,
+                        text = if (isStreaming) "A raciocinar em tempo real..." else (if (expanded) "Processo de Pensamento" else "Ver raciocínio..."),
+                        color = if (isStreaming) GoldPrimary else GoldAccent,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
                     )
+                    if (isStreaming) {
+                        CircularProgressIndicator(
+                            color = GoldPrimary,
+                            modifier = Modifier.size(11.dp),
+                            strokeWidth = 1.5.dp
+                        )
+                    }
                 }
                 Icon(
                     imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
@@ -178,7 +198,7 @@ fun ThoughtDropdownCard(
                 ) {
                     SelectionContainer {
                         Text(
-                            text = thought.trim(),
+                            text = if (isStreaming) thought.trim() + " ▎" else thought.trim(),
                             color = TextTertiary,
                             fontSize = 12.5.sp,
                             lineHeight = 18.sp,

@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
@@ -823,7 +824,9 @@ fun MessageBubble(
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             MarkdownMessageView(
                                 text = message.text,
-                                textColor = TextSecondary
+                                textColor = TextSecondary,
+                                reasoning = message.reasoning,
+                                isStreaming = true
                             )
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -835,7 +838,7 @@ fun MessageBubble(
                                     strokeWidth = 2.dp
                                 )
                                 Text(
-                                    text = "A receber...",
+                                    text = if (message.text.isNotBlank()) "A responder..." else "A raciocinar...",
                                     color = GoldAccent,
                                     fontSize = 11.5.sp,
                                     fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
@@ -872,8 +875,8 @@ fun MessageBubble(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(top = 4.dp),
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.CenterVertically
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
                             ) {
                                 TextButton(
                                     onClick = onRetry,
@@ -899,7 +902,9 @@ fun MessageBubble(
                         } else {
                             MarkdownMessageView(
                                 text = message.text,
-                                textColor = TextSecondary
+                                textColor = TextSecondary,
+                                reasoning = message.reasoning,
+                                isStreaming = false
                             )
                         }
                     }
@@ -1025,11 +1030,11 @@ fun EmptyChatState(
 @Composable
 fun LiveStatusPanel(thinking: String?, toolUse: String?, modifier: Modifier = Modifier) {
     Surface(
-        color = NavyDeep,
+        color = NavySurfaceCard,
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp)
-            .border(BorderStroke(1.dp, NavyBorderSubtle), RoundedCornerShape(10.dp))
+            .border(BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.5f)), RoundedCornerShape(10.dp))
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
             if (!toolUse.isNullOrBlank()) {
@@ -1045,13 +1050,36 @@ fun LiveStatusPanel(thinking: String?, toolUse: String?, modifier: Modifier = Mo
                 }
             }
             if (!thinking.isNullOrBlank()) {
+                if (!toolUse.isNullOrBlank()) Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Psychology,
+                        contentDescription = "Pensamento em direto",
+                        tint = GoldPrimary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Text(
+                        text = "Pensamento em direto",
+                        color = GoldPrimary,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    CircularProgressIndicator(
+                        color = GoldPrimary,
+                        modifier = Modifier.size(10.dp),
+                        strokeWidth = 1.5.dp
+                    )
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "💭 $thinking",
+                    text = thinking.takeLast(1000) + " ▎",
                     color = TextSecondary,
                     fontSize = 11.sp,
                     lineHeight = 15.sp,
-                    maxLines = 5,
+                    maxLines = 6,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }

@@ -133,15 +133,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(key, val)
 
         if is_stream:
-            # Streaming: retransmite os chunks à medida que chegam do gateway.
+            # Streaming: retransmite cada linha/chunk SSE à medida que chega do gateway
+            # sem bufferizar (readline repassa data: ...\n\n instantaneamente).
             self.send_header("Connection", "close")
+            self.send_header("Cache-Control", "no-cache, no-transform")
+            self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
             try:
                 while True:
-                    chunk = resp.read(1024)
-                    if not chunk:
+                    line = resp.readline()
+                    if not line:
                         break
-                    self.wfile.write(chunk)
+                    self.wfile.write(line)
                     self.wfile.flush()
             except Exception:
                 pass

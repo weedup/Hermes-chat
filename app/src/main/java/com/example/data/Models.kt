@@ -117,6 +117,8 @@ data class OpenAiDelta(
     val role: String? = null,
     val content: String? = null,
     @SerialName("reasoning_content") val reasoningContent: String? = null,
+    @SerialName("reasoning") val reasoning: String? = null,
+    @SerialName("thought") val thought: String? = null,
     @SerialName("tool_calls") val toolCalls: List<OpenAiToolCallDelta>? = null
 )
 

@@ -337,25 +337,41 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val currentSettings = settings.value
             val history = messages.value.filter { it.status == MessageStatus.SENT }
 
-            // Streaming callback: atualiza a mensagem em tempo real no Room
+            // Streaming callback: atualiza texto e raciocínio em tempo real no Room e StateFlow
             var accumulatedText = ""
+            var currentReasoning = ""
+            _liveThinking.value = null
+            _liveToolUse.value = null
+            _finalThinking.value = null
+
             apiClient.onStreamChunk = { chunk ->
                 accumulatedText += chunk
                 val currentChunkText = accumulatedText
+                val reasoningSnapshot = currentReasoning
                 viewModelScope.launch {
                     val updated = pendingHermesMsg.copy(
                         text = currentChunkText,
-                        status = MessageStatus.STREAMING
+                        status = MessageStatus.STREAMING,
+                        reasoning = reasoningSnapshot.takeIf { it.isNotBlank() }
                     )
                     repository.updateMessage(updated)
                 }
             }
-            _liveThinking.value = null
-            _liveToolUse.value = null
-            _finalThinking.value = null
+
             apiClient.onReasoningChunk = { reasoningText ->
-                viewModelScope.launch { _liveThinking.value = reasoningText }
+                currentReasoning = reasoningText
+                _liveThinking.value = reasoningText
+                val textSnapshot = accumulatedText
+                viewModelScope.launch {
+                    val updated = pendingHermesMsg.copy(
+                        text = textSnapshot,
+                        status = MessageStatus.STREAMING,
+                        reasoning = reasoningText.takeIf { it.isNotBlank() }
+                    )
+                    repository.updateMessage(updated)
+                }
             }
+
             apiClient.onToolUse = { toolsText ->
                 viewModelScope.launch { _liveToolUse.value = toolsText }
             }
@@ -378,17 +394,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _liveThinking.value = null
                 _liveToolUse.value = null
                 _finalThinking.value = null
+                val finalReasoning = reasoning?.takeIf { it.isNotBlank() } ?: currentReasoning.takeIf { it.isNotBlank() }
                 val completedMsg = pendingHermesMsg.copy(
                     text = if (accumulatedText.isNotBlank()) accumulatedText else reply,
                     status = MessageStatus.SENT,
                     latencyMs = latency,
-                    reasoning = reasoning?.takeIf { it.isNotBlank() }
+                    reasoning = finalReasoning
                 )
                 repository.updateMessage(completedMsg)
 
-                // Mostrar pensamento final depois da resposta
-                if (!reasoning.isNullOrBlank()) {
-                    _finalThinking.value = reasoning
+                // Disponibilizar pensamento final após a resposta
+                if (!finalReasoning.isNullOrBlank()) {
+                    _finalThinking.value = finalReasoning
                 }
 
                 if (currentSettings.hapticEnabled) {

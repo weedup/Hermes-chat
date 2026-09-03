@@ -13,6 +13,7 @@ import io.ktor.client.plugins.logging.Logging
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
@@ -302,86 +303,144 @@ class HermesApiClient {
             val targetUrl = "$normalized$endpointPath"
             try {
                 if (isStreaming && isOpenAi) {
-                    val response: HttpResponse = client.post(targetUrl) {
-                        contentType(ContentType.Application.Json)
-                        header(HttpHeaders.Accept, "text/event-stream")
-                        // Sem gzip: qualquer caminho de descompressão em OkHttp
-                        // bufferiza o corpo até ao fim e mata o streaming.
-                        header("Accept-Encoding", "identity")
-                        setBody(openAiPayload)
-                    }
+                    try {
+                        val streamResult: Result<Triple<String, Long, String>>? = client.preparePost(targetUrl) {
+                            contentType(ContentType.Application.Json)
+                            header(HttpHeaders.Accept, "text/event-stream")
+                            // Sem gzip e sem bufferização intermediária
+                            header("Accept-Encoding", "identity")
+                            header("Cache-Control", "no-cache, no-transform")
+                            header("X-Accel-Buffering", "no")
+                            setBody(openAiPayload)
+                        }.execute { response ->
+                            if (!response.status.isSuccess()) {
+                                return@execute null
+                            }
+                            val channel = response.bodyAsChannel()
+                            val fullReply = StringBuilder()
+                            val reasoningBuf = StringBuilder()
+                            val toolCallsBuf = StringBuilder()
+                            var firstToolSeen = false
+                            var inThinkBlock = false
 
-                    if (response.status.isSuccess()) {
-                        val channel = response.bodyAsChannel()
-                        val fullReply = StringBuilder()
-                        val reasoningBuf = StringBuilder()
-                        val toolCallsBuf = StringBuilder()
-                        var firstToolSeen = false
-
-                        while (!channel.isClosedForRead) {
-                            val line = channel.readUTF8Line() ?: break
-                            val trimmedLine = line.trim()
-                            if (trimmedLine.startsWith("data:")) {
-                                val dataContent = trimmedLine.removePrefix("data:").trim()
-                                if (dataContent == "[DONE]") break
-
-                                try {
-                                    var deltaText: String? = null
-                                    var reasoningText: String? = null
+                            while (!channel.isClosedForRead) {
+                                val line = channel.readUTF8Line() ?: break
+                                val trimmedLine = line.trim()
+                                if (trimmedLine.startsWith("data:")) {
+                                    val dataContent = trimmedLine.removePrefix("data:").trim()
+                                    if (dataContent == "[DONE]") break
 
                                     try {
-                                        val streamResponse = jsonConfig.decodeFromString<OpenAiChatResponse>(dataContent)
-                                        val delta = streamResponse.choices.firstOrNull()?.delta
-                                        deltaText = delta?.content
-                                        reasoningText = delta?.reasoningContent
-                                        val tc = delta?.toolCalls
-                                        if (!tc.isNullOrEmpty()) {
-                                            for (call in tc) {
-                                                val name = call.function?.name
-                                                if (!name.isNullOrEmpty()) {
-                                                    if (firstToolSeen) toolCallsBuf.append(", ")
-                                                    toolCallsBuf.append(name)
-                                                    firstToolSeen = true
+                                        var deltaText: String? = null
+                                        var reasoningText: String? = null
+
+                                        try {
+                                            val streamResponse = jsonConfig.decodeFromString<OpenAiChatResponse>(dataContent)
+                                            val delta = streamResponse.choices.firstOrNull()?.delta
+                                            deltaText = delta?.content
+                                            reasoningText = delta?.reasoningContent ?: delta?.reasoning ?: delta?.thought
+                                            val tc = delta?.toolCalls
+                                            if (!tc.isNullOrEmpty()) {
+                                                for (call in tc) {
+                                                    val name = call.function?.name
+                                                    if (!name.isNullOrEmpty()) {
+                                                        if (firstToolSeen) toolCallsBuf.append(", ")
+                                                        toolCallsBuf.append(name)
+                                                        firstToolSeen = true
+                                                    }
+                                                }
+                                                withContext(Dispatchers.Main) {
+                                                    onToolUse?.invoke(toolCallsBuf.toString())
                                                 }
                                             }
-                                            withContext(Dispatchers.Main) {
-                                                onToolUse?.invoke(toolCallsBuf.toString())
-                                            }
+                                        } catch (_: Exception) {
+                                            // Fallback resiliente: parse manual de JSON caso o DTO estrito falhe
+                                            try {
+                                                val el = jsonConfig.parseToJsonElement(dataContent)
+                                                if (el is JsonObject) {
+                                                    val firstChoice = el["choices"]?.jsonArray?.firstOrNull()?.jsonObject
+                                                    val deltaObj = firstChoice?.get("delta")?.jsonObject
+                                                    deltaText = deltaObj?.get("content")?.jsonPrimitive?.contentOrNull
+                                                    reasoningText = deltaObj?.get("reasoning_content")?.jsonPrimitive?.contentOrNull
+                                                        ?: deltaObj?.get("reasoning")?.jsonPrimitive?.contentOrNull
+                                                        ?: deltaObj?.get("thought")?.jsonPrimitive?.contentOrNull
+                                                }
+                                            } catch (_: Exception) {}
                                         }
-                                    } catch (_: Exception) {
-                                        // Fallback resiliente: parse manual de JSON caso o DTO estrito falhe
-                                        try {
-                                            val el = jsonConfig.parseToJsonElement(dataContent)
-                                            if (el is JsonObject) {
-                                                val firstChoice = el["choices"]?.jsonArray?.firstOrNull()?.jsonObject
-                                                val deltaObj = firstChoice?.get("delta")?.jsonObject
-                                                deltaText = deltaObj?.get("content")?.jsonPrimitive?.contentOrNull
-                                                reasoningText = deltaObj?.get("reasoning_content")?.jsonPrimitive?.contentOrNull
-                                            }
-                                        } catch (_: Exception) {}
-                                    }
 
-                                    if (!deltaText.isNullOrEmpty()) {
-                                        fullReply.append(deltaText)
-                                        withContext(Dispatchers.Main) {
-                                            onStreamChunk?.invoke(deltaText)
+                                        // Caso 1: Raciocínio explícito do campo reasoning_content/reasoning/thought
+                                        if (!reasoningText.isNullOrEmpty()) {
+                                            reasoningBuf.append(reasoningText)
+                                            withContext(Dispatchers.Main) {
+                                                onReasoningChunk?.invoke(reasoningBuf.toString())
+                                            }
                                         }
-                                    }
-                                    if (!reasoningText.isNullOrEmpty()) {
-                                        reasoningBuf.append(reasoningText)
-                                        withContext(Dispatchers.Main) {
-                                            onReasoningChunk?.invoke(reasoningBuf.toString())
+
+                                        // Caso 2: Conteúdo de texto com suporte em tempo real para tags <think>...</think>
+                                        val nonNullDelta = deltaText
+                                        if (nonNullDelta != null && nonNullDelta.isNotEmpty()) {
+                                            var remaining: String = nonNullDelta
+                                            while (remaining.isNotEmpty()) {
+                                                if (!inThinkBlock) {
+                                                    val thinkIdx = remaining.indexOf("<think>")
+                                                    if (thinkIdx != -1) {
+                                                        val pre = remaining.substring(0, thinkIdx)
+                                                        if (pre.isNotEmpty()) {
+                                                            fullReply.append(pre)
+                                                            withContext(Dispatchers.Main) {
+                                                                onStreamChunk?.invoke(pre)
+                                                            }
+                                                        }
+                                                        inThinkBlock = true
+                                                        remaining = remaining.substring(thinkIdx + 7)
+                                                    } else {
+                                                        fullReply.append(remaining)
+                                                        withContext(Dispatchers.Main) {
+                                                            onStreamChunk?.invoke(remaining)
+                                                        }
+                                                        remaining = ""
+                                                    }
+                                                } else {
+                                                    val closeIdx = remaining.indexOf("</think>")
+                                                    if (closeIdx != -1) {
+                                                        val thoughtPart = remaining.substring(0, closeIdx)
+                                                        if (thoughtPart.isNotEmpty()) {
+                                                            reasoningBuf.append(thoughtPart)
+                                                            withContext(Dispatchers.Main) {
+                                                                onReasoningChunk?.invoke(reasoningBuf.toString())
+                                                            }
+                                                        }
+                                                        inThinkBlock = false
+                                                        remaining = remaining.substring(closeIdx + 8)
+                                                    } else {
+                                                        reasoningBuf.append(remaining)
+                                                        withContext(Dispatchers.Main) {
+                                                            onReasoningChunk?.invoke(reasoningBuf.toString())
+                                                        }
+                                                        remaining = ""
+                                                    }
+                                                }
+                                            }
                                         }
-                                    }
-                                } catch (_: Exception) {}
+                                    } catch (_: Exception) {}
+                                }
+                            }
+
+                            val replyText = fullReply.toString()
+                            val reasoningTextTotal = reasoningBuf.toString()
+                            if (replyText.isNotBlank() || reasoningTextTotal.isNotBlank()) {
+                                val latency = System.currentTimeMillis() - startTime
+                                Result.success(Triple(replyText, latency, reasoningTextTotal))
+                            } else {
+                                null
                             }
                         }
 
-                        val replyText = fullReply.toString()
-                        if (replyText.isNotBlank()) {
-                            val latency = System.currentTimeMillis() - startTime
-                            return@withContext Result.success(Triple(replyText, latency, reasoningBuf.toString()))
+                        if (streamResult != null && streamResult.isSuccess) {
+                            return@withContext streamResult
                         }
+                    } catch (e: Exception) {
+                        Log.w("HermesApiClient", "Streaming falhou em $targetUrl: ${e.message}, tentando POST não-streaming", e)
                     }
                 }
 
@@ -392,9 +451,9 @@ class HermesApiClient {
 
                 if (response.status.isSuccess()) {
                     val responseBody = response.bodyAsText()
-                    val reply = parseSuccessfulResponse(responseBody)
+                    val (reply, reasoning) = parseSuccessfulResponseWithReasoning(responseBody)
                     val latency = System.currentTimeMillis() - startTime
-                    return@withContext Result.success(Triple(reply, latency, null))
+                    return@withContext Result.success(Triple(reply, latency, reasoning ?: ""))
                 } else {
                     lastException = Exception("HTTP ${response.status.value} em $targetUrl — verifica o endpoint nas definições (usa AUTO para tentar /v1/chat/completions)")
                 }
@@ -407,22 +466,45 @@ class HermesApiClient {
         return@withContext Result.failure(lastException ?: Exception("Falha de ligação ao Hermes (nenhum endpoint respondeu em $normalized)"))
     }
 
-    private fun parseSuccessfulResponse(body: String): String {
+    private fun parseSuccessfulResponseWithReasoning(body: String): Pair<String, String?> {
         try {
             val jsonElement = jsonConfig.parseToJsonElement(body)
             if (jsonElement is JsonObject) {
                 val choices = jsonElement["choices"]?.jsonArray
-                val messageContent = choices?.firstOrNull()?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
-                if (!messageContent.isNullOrBlank()) return messageContent
+                val msgObj = choices?.firstOrNull()?.jsonObject?.get("message")?.jsonObject
+                val messageContent = msgObj?.get("content")?.jsonPrimitive?.contentOrNull
+                val reasoningContent = msgObj?.get("reasoning_content")?.jsonPrimitive?.contentOrNull
+                    ?: msgObj?.get("reasoning")?.jsonPrimitive?.contentOrNull
+                    ?: msgObj?.get("thought")?.jsonPrimitive?.contentOrNull
+
+                if (!messageContent.isNullOrBlank()) {
+                    if (!reasoningContent.isNullOrBlank()) {
+                        return Pair(messageContent, reasoningContent)
+                    }
+                    val oIdx = messageContent.indexOf("<think>")
+                    val cIdx = messageContent.indexOf("</think>")
+                    if (oIdx != -1 && cIdx != -1 && cIdx > oIdx) {
+                        val thought = messageContent.substring(oIdx + 7, cIdx).trim()
+                        val before = messageContent.substring(0, oIdx).trim()
+                        val after = messageContent.substring(cIdx + 8).trim()
+                        val clean = if (before.isNotEmpty() && after.isNotEmpty()) "$before\n\n$after" else "$before$after"
+                        return Pair(clean, thought)
+                    }
+                    return Pair(messageContent, null)
+                }
 
                 val textDirect = jsonElement["text"]?.jsonPrimitive?.contentOrNull
-                if (!textDirect.isNullOrBlank()) return textDirect
+                if (!textDirect.isNullOrBlank()) return Pair(textDirect, null)
 
                 val responseDirect = jsonElement["response"]?.jsonPrimitive?.contentOrNull
-                if (!responseDirect.isNullOrBlank()) return responseDirect
+                if (!responseDirect.isNullOrBlank()) return Pair(responseDirect, null)
             }
         } catch (_: Exception) {}
-        return body
+        return Pair(body, null)
+    }
+
+    private fun parseSuccessfulResponse(body: String): String {
+        return parseSuccessfulResponseWithReasoning(body).first
     }
 
     suspend fun probeEndpoints(baseUrl: String): List<EndpointProbeResult> = withContext(Dispatchers.IO) {
