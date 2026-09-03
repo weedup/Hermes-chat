@@ -449,6 +449,16 @@ fun ChatScreen(
                     }
                 )
 
+                // Painel ao vivo: pensamento do modelo + ferramentas em uso
+                val liveThinking by viewModel.liveThinking.collectAsState()
+                val liveToolUse by viewModel.liveToolUse.collectAsState()
+                if (isGenerating && (!liveThinking.isNullOrBlank() || !liveToolUse.isNullOrBlank())) {
+                    LiveStatusPanel(
+                        thinking = liveThinking?.takeLast(600),
+                        toolUse = liveToolUse
+                    )
+                }
+
                 // Input Bar com Badge Corrigido
                 ChatInputBar(
                     inputText = inputText,
@@ -998,6 +1008,43 @@ fun EmptyChatState(
             color = TextSecondary,
             fontSize = 14.sp
         )
+    }
+}
+
+@Composable
+fun LiveStatusPanel(thinking: String?, toolUse: String?, modifier: Modifier = Modifier) {
+    Surface(
+        color = NavyDeep,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .border(BorderStroke(1.dp, NavyBorderSubtle), RoundedCornerShape(10.dp))
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            if (!toolUse.isNullOrBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("🔧", fontSize = 13.sp)
+                    Text(
+                        text = toolUse,
+                        color = GoldAccent,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+            }
+            if (!thinking.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "💭 $thinking",
+                    color = TextSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    maxLines = 5,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+        }
     }
 }
 

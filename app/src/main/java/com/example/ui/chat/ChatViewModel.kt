@@ -68,6 +68,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
+    // Pensamento ao vivo do modelo + ferramentas em uso
+    private val _liveThinking = MutableStateFlow<String?>(null)
+    val liveThinking: StateFlow<String?> = _liveThinking.asStateFlow()
+
+    private val _liveToolUse = MutableStateFlow<String?>(null)
+    val liveToolUse: StateFlow<String?> = _liveToolUse.asStateFlow()
+
     private val _serverHealth = MutableStateFlow<ServerHealth?>(null)
     val serverHealth: StateFlow<ServerHealth?> = _serverHealth.asStateFlow()
 
@@ -232,6 +239,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         generateJob?.cancel()
         generateJob = null
         _isGenerating.value = false
+        _liveThinking.value = null
+        _liveToolUse.value = null
         _pendingQueue.value = emptyList()
         _pendingCount.value = 0
         viewModelScope.launch {
@@ -332,6 +341,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     repository.updateMessage(updated)
                 }
             }
+            _liveThinking.value = null
+            _liveToolUse.value = null
+            apiClient.onReasoningChunk = { reasoningText ->
+                viewModelScope.launch { _liveThinking.value = reasoningText }
+            }
+            apiClient.onToolUse = { toolsText ->
+                viewModelScope.launch { _liveToolUse.value = toolsText }
+            }
 
             val result = apiClient.sendMessage(
                 baseUrl = currentSettings.serverUrl,
@@ -348,6 +365,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             if (result.isSuccess) {
                 val (reply, latency) = result.getOrThrow()
+                _liveThinking.value = null
+                _liveToolUse.value = null
                 val completedMsg = pendingHermesMsg.copy(
                     text = if (accumulatedText.isNotBlank()) accumulatedText else reply,
                     status = MessageStatus.SENT,
@@ -364,6 +383,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     serverHeader = "Hermes-Server"
                 )
             } else {
+                _liveThinking.value = null
+                _liveToolUse.value = null
                 val error = result.exceptionOrNull()
                 val errorMsg = pendingHermesMsg.copy(
                     text = if (accumulatedText.isNotBlank()) accumulatedText else "Erro na resposta do Hermes: ${error?.message ?: "Falha de ligação"}",

@@ -1,5 +1,6 @@
 package com.example.data
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 enum class MessageSender {
@@ -113,7 +114,22 @@ data class OpenAiChoice(
 @Serializable
 data class OpenAiDelta(
     val role: String? = null,
-    val content: String? = null
+    val content: String? = null,
+    @SerialName("reasoning_content") val reasoningContent: String? = null,
+    @SerialName("tool_calls") val toolCalls: List<OpenAiToolCallDelta>? = null
+)
+
+@Serializable
+data class OpenAiToolCallDelta(
+    val index: Int = 0,
+    val id: String? = null,
+    val function: OpenAiToolCallFunctionDelta? = null
+)
+
+@Serializable
+data class OpenAiToolCallFunctionDelta(
+    val name: String? = null,
+    val arguments: String? = null
 )
 
 @Serializable

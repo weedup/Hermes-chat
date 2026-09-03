@@ -137,6 +137,8 @@ class HermesApiClient {
     }
 
     var onStreamChunk: ((String) -> Unit)? = null
+    var onReasoningChunk: ((String) -> Unit)? = null
+    var onToolUse: ((String) -> Unit)? = null
 
     suspend fun fetchProfile(baseUrl: String): String? = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl).removeSuffix("/")
@@ -303,6 +305,9 @@ class HermesApiClient {
                     if (response.status.isSuccess()) {
                         val channel = response.bodyAsChannel()
                         val fullReply = StringBuilder()
+                        val reasoningBuf = StringBuilder()
+                        val toolCallsBuf = StringBuilder()
+                        var firstToolSeen = false
 
                         while (!channel.isClosedForRead) {
                             val line = channel.readUTF8Line() ?: break
@@ -313,11 +318,35 @@ class HermesApiClient {
 
                                 try {
                                     val streamResponse = jsonConfig.decodeFromString<OpenAiChatResponse>(dataContent)
-                                    val deltaText = streamResponse.choices.firstOrNull()?.delta?.content
+                                    val delta = streamResponse.choices.firstOrNull()?.delta
+                                    val deltaText = delta?.content
                                     if (!deltaText.isNullOrEmpty()) {
                                         fullReply.append(deltaText)
                                         withContext(Dispatchers.Main) {
                                             onStreamChunk?.invoke(deltaText)
+                                        }
+                                    }
+                                    // Pensamento do modelo (reasoning_content dos chunks SSE)
+                                    val reasoningText = delta?.reasoningContent
+                                    if (!reasoningText.isNullOrEmpty()) {
+                                        reasoningBuf.append(reasoningText)
+                                        withContext(Dispatchers.Main) {
+                                            onReasoningChunk?.invoke(reasoningBuf.toString())
+                                        }
+                                    }
+                                    // Uso de ferramentas (tool_calls em streaming)
+                                    val tc = delta?.toolCalls
+                                    if (!tc.isNullOrEmpty()) {
+                                        for (call in tc) {
+                                            val name = call.function?.name
+                                            if (!name.isNullOrEmpty()) {
+                                                if (firstToolSeen) toolCallsBuf.append(", ")
+                                                toolCallsBuf.append(name)
+                                                firstToolSeen = true
+                                            }
+                                        }
+                                        withContext(Dispatchers.Main) {
+                                            onToolUse?.invoke(toolCallsBuf.toString())
                                         }
                                     }
                                 } catch (_: Exception) {}
