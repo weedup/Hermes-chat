@@ -49,8 +49,12 @@ class HermesApiClient {
     }
 
     private val client = HttpClient(OkHttp) {
-        install(ContentNegotiation) {
-            json(jsonConfig)
+        // SSE: sem ContentNegotiation/buffering no caminho do streaming.
+        // OkHttp precisa de saber que a resposta chega em chunks (event-stream).
+        engine {
+            config {
+                retryOnConnectionFailure(true)
+            }
         }
         install(HttpTimeout) {
             requestTimeoutMillis = 300_000
@@ -299,6 +303,10 @@ class HermesApiClient {
                 if (isStreaming && isOpenAi) {
                     val response: HttpResponse = client.post(targetUrl) {
                         contentType(ContentType.Application.Json)
+                        header(HttpHeaders.Accept, "text/event-stream")
+                        // Sem gzip: qualquer caminho de descompressão em OkHttp
+                        // bufferiza o corpo até ao fim e mata o streaming.
+                        header("Accept-Encoding", "identity")
                         setBody(openAiPayload)
                     }
 
