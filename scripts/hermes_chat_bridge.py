@@ -124,7 +124,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         ctype = resp.getheader("Content-Type") or ""
-        is_stream = "text/event-stream" in ctype or "stream" in ctype
+        is_stream = "text/event-stream" in ctype or "stream" in ctype or (body and b'"stream": true' in body)
 
         self.send_response(resp.status)
         for key, val in resp.getheaders():

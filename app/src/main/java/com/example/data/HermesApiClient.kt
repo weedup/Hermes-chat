@@ -326,36 +326,51 @@ class HermesApiClient {
                                 if (dataContent == "[DONE]") break
 
                                 try {
-                                    val streamResponse = jsonConfig.decodeFromString<OpenAiChatResponse>(dataContent)
-                                    val delta = streamResponse.choices.firstOrNull()?.delta
-                                    val deltaText = delta?.content
+                                    var deltaText: String? = null
+                                    var reasoningText: String? = null
+
+                                    try {
+                                        val streamResponse = jsonConfig.decodeFromString<OpenAiChatResponse>(dataContent)
+                                        val delta = streamResponse.choices.firstOrNull()?.delta
+                                        deltaText = delta?.content
+                                        reasoningText = delta?.reasoningContent
+                                        val tc = delta?.toolCalls
+                                        if (!tc.isNullOrEmpty()) {
+                                            for (call in tc) {
+                                                val name = call.function?.name
+                                                if (!name.isNullOrEmpty()) {
+                                                    if (firstToolSeen) toolCallsBuf.append(", ")
+                                                    toolCallsBuf.append(name)
+                                                    firstToolSeen = true
+                                                }
+                                            }
+                                            withContext(Dispatchers.Main) {
+                                                onToolUse?.invoke(toolCallsBuf.toString())
+                                            }
+                                        }
+                                    } catch (_: Exception) {
+                                        // Fallback resiliente: parse manual de JSON caso o DTO estrito falhe
+                                        try {
+                                            val el = jsonConfig.parseToJsonElement(dataContent)
+                                            if (el is JsonObject) {
+                                                val firstChoice = el["choices"]?.jsonArray?.firstOrNull()?.jsonObject
+                                                val deltaObj = firstChoice?.get("delta")?.jsonObject
+                                                deltaText = deltaObj?.get("content")?.jsonPrimitive?.contentOrNull
+                                                reasoningText = deltaObj?.get("reasoning_content")?.jsonPrimitive?.contentOrNull
+                                            }
+                                        } catch (_: Exception) {}
+                                    }
+
                                     if (!deltaText.isNullOrEmpty()) {
                                         fullReply.append(deltaText)
                                         withContext(Dispatchers.Main) {
                                             onStreamChunk?.invoke(deltaText)
                                         }
                                     }
-                                    // Pensamento do modelo (reasoning_content dos chunks SSE)
-                                    val reasoningText = delta?.reasoningContent
                                     if (!reasoningText.isNullOrEmpty()) {
                                         reasoningBuf.append(reasoningText)
                                         withContext(Dispatchers.Main) {
                                             onReasoningChunk?.invoke(reasoningBuf.toString())
-                                        }
-                                    }
-                                    // Uso de ferramentas (tool_calls em streaming)
-                                    val tc = delta?.toolCalls
-                                    if (!tc.isNullOrEmpty()) {
-                                        for (call in tc) {
-                                            val name = call.function?.name
-                                            if (!name.isNullOrEmpty()) {
-                                                if (firstToolSeen) toolCallsBuf.append(", ")
-                                                toolCallsBuf.append(name)
-                                                firstToolSeen = true
-                                            }
-                                        }
-                                        withContext(Dispatchers.Main) {
-                                            onToolUse?.invoke(toolCallsBuf.toString())
                                         }
                                     }
                                 } catch (_: Exception) {}
