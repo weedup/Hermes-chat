@@ -26,7 +26,8 @@ data class ChatMessageEntity(
     val status: String,
     val latencyMs: Long,
     val modelName: String,
-    val errorDetails: String? = null
+    val errorDetails: String? = null,
+    val reasoning: String? = null
 )
 
 fun ChatMessageEntity.toDomain(): ChatMessage {
@@ -48,7 +49,8 @@ fun ChatMessageEntity.toDomain(): ChatMessage {
         },
         latencyMs = latencyMs,
         modelName = modelName,
-        errorDetails = errorDetails
+        errorDetails = errorDetails,
+        reasoning = reasoning
     )
 }
 

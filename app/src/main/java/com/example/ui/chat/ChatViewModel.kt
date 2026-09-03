@@ -1,32 +1,3 @@
-package com.example.ui.chat
-
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
-import com.example.data.ChatMessage
-import com.example.data.ChatRepository
-import com.example.data.ChatSession
-import com.example.data.HermesApiClient
-import com.example.data.HermesSettings
-import com.example.data.MessageSender
-import com.example.data.MessageStatus
-import com.example.data.PreferencesManager
-import com.example.data.ProfileDto
-import com.example.data.ServerHealth
-import com.example.util.HapticHelper
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
-import java.util.UUID
-
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = ChatRepository(application)
@@ -74,6 +45,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _liveToolUse = MutableStateFlow<String?>(null)
     val liveToolUse: StateFlow<String?> = _liveToolUse.asStateFlow()
+
+    // Pensamento final (após resposta completa)
+    private val _finalThinking = MutableStateFlow<String?>(null)
+    val finalThinking: StateFlow<String?> = _finalThinking.asStateFlow()
 
     private val _serverHealth = MutableStateFlow<ServerHealth?>(null)
     val serverHealth: StateFlow<ServerHealth?> = _serverHealth.asStateFlow()
@@ -245,6 +220,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _isGenerating.value = false
         _liveThinking.value = null
         _liveToolUse.value = null
+        _finalThinking.value = null
         _pendingQueue.value = emptyList()
         _pendingCount.value = 0
         viewModelScope.launch {
@@ -347,6 +323,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
             _liveThinking.value = null
             _liveToolUse.value = null
+            _finalThinking.value = null
             apiClient.onReasoningChunk = { reasoningText ->
                 viewModelScope.launch { _liveThinking.value = reasoningText }
             }
@@ -377,6 +354,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     latencyMs = latency
                 )
                 repository.updateMessage(completedMsg)
+
+                // Fetch reasoning from the persisted message after completion
+                viewModelScope.launch(Dispatchers.IO) {
+                    val allMsgs = repository.getMessagesForSession(currentSId).first()
+                    val hermesMsg = allMsgs.lastOrNull { it.sender == MessageSender.HERMES }
+                    if (hermesMsg != null && !hermesMsg.reasoning.isNullOrBlank()) {
+                        viewModelScope.launch { _finalThinking.value = hermesMsg.reasoning }
+                    }
+                }
+
                 if (currentSettings.hapticEnabled) {
                     hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
                 }
@@ -389,6 +376,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 _liveThinking.value = null
                 _liveToolUse.value = null
+                _finalThinking.value = null
                 val error = result.exceptionOrNull()
                 val errorMsg = pendingHermesMsg.copy(
                     text = if (accumulatedText.isNotBlank()) accumulatedText else "Erro na resposta do Hermes: ${error?.message ?: "Falha de ligação"}",
