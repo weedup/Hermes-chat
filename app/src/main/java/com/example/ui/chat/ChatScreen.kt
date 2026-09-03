@@ -814,7 +814,7 @@ fun MessageBubble(
                                 strokeWidth = 2.dp
                             )
                             Text(
-                                text = "A iniciar resposta...",
+                                text = "A processar…",
                                 color = GoldAccent,
                                 fontSize = 13.sp,
                                 fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
@@ -828,22 +828,6 @@ fun MessageBubble(
                                 reasoning = message.reasoning,
                                 isStreaming = true
                             )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                CircularProgressIndicator(
-                                    color = GoldPrimary,
-                                    modifier = Modifier.size(12.dp),
-                                    strokeWidth = 2.dp
-                                )
-                                Text(
-                                    text = if (message.text.isNotBlank()) "A responder..." else "A raciocinar...",
-                                    color = GoldAccent,
-                                    fontSize = 11.5.sp,
-                                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
-                                )
-                            }
                         }
                     } else if (message.status == MessageStatus.ERROR) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
