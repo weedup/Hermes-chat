@@ -182,7 +182,19 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 data = json.loads((body or b"{}").decode())
                 prof = data.get("profile", "default")
+                # Tenta mudar o perfil activo via CLI do Hermes.
                 os.environ["HERMES_PROFILE"] = prof
+                try:
+                    import subprocess
+                    subprocess.run(
+                        ["hermes", "profile", "use", prof],
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=5,
+                    )
+                except Exception:
+                    pass
                 _send_json(self, {"success": True, "profile": prof})
             except Exception as e:  # noqa: BLE001
                 _send_json(self, {"success": False, "error": str(e)}, status=400)

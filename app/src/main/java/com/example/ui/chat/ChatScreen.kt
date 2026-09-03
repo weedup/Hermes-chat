@@ -410,6 +410,22 @@ fun ChatScreen(
                     }
                 }
 
+                // Painel ao vivo: pensamento do modelo + ferramentas em uso
+                val liveThinking by viewModel.liveThinking.collectAsState()
+                val liveToolUse by viewModel.liveToolUse.collectAsState()
+                val finalThinking by viewModel.finalThinking.collectAsState()
+                if (isGenerating) {
+                    LiveStatusPanel(
+                        thinking = liveThinking?.takeLast(600) ?: "A raciocinar…",
+                        toolUse = liveToolUse
+                    )
+                } else if (!finalThinking.isNullOrBlank()) {
+                    LiveStatusPanel(
+                        thinking = finalThinking?.takeLast(1000),
+                        toolUse = null
+                    )
+                }
+
                 // Chat Messages or Empty State
                 Box(
                     modifier = Modifier
@@ -454,22 +470,6 @@ fun ChatScreen(
                         viewModel.sendMessage(prompt)
                     }
                 )
-
-                // Painel ao vivo: pensamento do modelo + ferramentas em uso
-                val liveThinking by viewModel.liveThinking.collectAsState()
-                val liveToolUse by viewModel.liveToolUse.collectAsState()
-                val finalThinking by viewModel.finalThinking.collectAsState()
-                if (isGenerating) {
-                    LiveStatusPanel(
-                        thinking = liveThinking?.takeLast(600) ?: "A raciocinar…",
-                        toolUse = liveToolUse
-                    )
-                } else if (!finalThinking.isNullOrBlank()) {
-                    LiveStatusPanel(
-                        thinking = finalThinking?.takeLast(1000),
-                        toolUse = null
-                    )
-                }
 
                 // Input Bar com Badge Corrigido
                 ChatInputBar(
