@@ -241,12 +241,7 @@ fun ChatScreen(
             ) {
                 if (messages.isEmpty()) {
                     EmptyChatState(
-                        serverUrl = settings.serverUrl,
-                        isServerOnline = serverHealth?.isReachable == true,
-                        onPromptSelected = { prompt ->
-                            viewModel.sendMessage(prompt)
-                        },
-                        onOpenSettings = onNavigateToSettings
+                        modifier = Modifier.fillMaxSize()
                     )
                 } else {
                     LazyColumn(
@@ -701,17 +696,6 @@ fun MessageBubble(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 TextButton(
-                                    onClick = onOpenSettings,
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                ) {
-                                    Icon(Icons.Default.Settings, null, tint = GoldAccent, modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Configurar Rota", color = GoldAccent, fontSize = 12.sp)
-                                }
-
-                                Spacer(modifier = Modifier.width(4.dp))
-
-                                TextButton(
                                     onClick = onRetry,
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                                 ) {
@@ -810,10 +794,6 @@ fun MessageBubble(
 
 @Composable
 fun EmptyChatState(
-    serverUrl: String,
-    isServerOnline: Boolean,
-    onPromptSelected: (String) -> Unit,
-    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -856,65 +836,17 @@ fun EmptyChatState(
         Spacer(modifier = Modifier.height(6.dp))
 
         Text(
-            text = "Ligação direta ao servidor Hermes no Termux (proot)",
+            text = "Ligação ao servidor Hermes no Termux",
             fontSize = 13.5.sp,
             color = TextSecondary
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Connection diagnostic card
-        Surface(
-            color = NavySurfaceCard,
-            shape = RoundedCornerShape(14.dp),
-            border = BorderStroke(1.dp, if (isServerOnline) StatusOnline.copy(alpha = 0.5f) else StatusOffline.copy(alpha = 0.5f)),
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onOpenSettings() }
-        ) {
-            Row(
-                modifier = Modifier.padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .background(if (isServerOnline) StatusOnline else StatusOffline, CircleShape)
-                )
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (isServerOnline) "Servidor Hermes Online (HTTP 9119)" else "Servidor Termux Não Detetado",
-                        color = if (isServerOnline) StatusOnline else StatusOffline,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp
-                    )
-                    Text(
-                        text = if (isServerOnline) serverUrl else "Toca para configurar o IP local ou porta no ecrã de Definições",
-                        color = TextSecondary,
-                        fontSize = 11.5.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = null,
-                    tint = GoldAccent,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "Ligação direta ao Hermes no Termux — toca nos comandos ou sugestões acima para começar.",
+            text = "Escreve uma mensagem para começar a conversar.",
             fontSize = 12.5.sp,
-            color = TextTertiary,
-            modifier = Modifier.align(Alignment.Start)
+            color = TextTertiary
         )
     }
 }

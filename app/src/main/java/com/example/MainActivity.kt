@@ -1,7 +1,10 @@
 package com.example
 
+import android.app.Activity
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -20,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import com.example.ui.chat.ChatScreen
 import com.example.ui.chat.ChatViewModel
 import com.example.ui.diagnostics.DiagnosticsBottomSheet
@@ -66,6 +70,30 @@ fun HermesChatApp(
 
     val serverHealth by chatViewModel.serverHealth.collectAsState()
     val settings by chatViewModel.settings.collectAsState()
+
+    val context = LocalContext.current
+    var lastBackPressTime by remember { mutableStateOf(0L) }
+
+    // When on SettingsScreen: pressing back returns to ChatScreen
+    BackHandler(enabled = currentDestination == AppDestination.SETTINGS) {
+        currentDestination = AppDestination.CHAT
+        chatViewModel.checkServerHealth()
+    }
+
+    // When on ChatScreen: pressing back prompts user to press again to exit
+    BackHandler(enabled = currentDestination == AppDestination.CHAT) {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastBackPressTime < 2000L) {
+            (context as? Activity)?.finish()
+        } else {
+            lastBackPressTime = currentTime
+            Toast.makeText(
+                context,
+                "Se quiser sair carregue outra vez na tecla retrocesso",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
 
     AnimatedContent(
         targetState = currentDestination,
