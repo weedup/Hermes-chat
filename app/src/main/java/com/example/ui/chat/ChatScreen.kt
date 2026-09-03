@@ -416,16 +416,12 @@ fun ChatScreen(
                 val finalThinking by viewModel.finalThinking.collectAsState()
                 val liveThinkingText = liveThinking.orEmpty()
                 val finalThinkingText = finalThinking.orEmpty()
-                val displayThinking = when {
-                    liveThinkingText.isNotBlank() -> liveThinkingText.takeLast(600)
-                    finalThinkingText.isNotBlank() -> finalThinkingText.takeLast(1000)
-                    isGenerating -> "A raciocinar…"
-                    else -> null
-                }
                 val displayToolUse = liveToolUse?.takeIf { it.isNotBlank() }
-                if ((isGenerating || finalThinkingText.isNotBlank()) && (displayThinking != null || displayToolUse != null)) {
+                if (liveThinkingText.isNotBlank() || finalThinkingText.isNotBlank() || displayToolUse != null) {
                     LiveStatusPanel(
-                        thinking = displayThinking ?: "Pensamento oculto pelo modelo",
+                        thinking = liveThinkingText.takeIf { it.isNotBlank() }
+                            ?: finalThinkingText.takeIf { it.isNotBlank() }
+                            ?: "A raciocinar…",
                         toolUse = displayToolUse
                     )
                 }
