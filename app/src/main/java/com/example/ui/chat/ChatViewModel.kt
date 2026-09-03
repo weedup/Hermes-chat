@@ -106,6 +106,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _agentName = MutableStateFlow<String?>("Agent T")
     val agentName: StateFlow<String?> = _agentName.asStateFlow()
 
+    private val _agentModel = MutableStateFlow<String?>("")
+    val agentModel: StateFlow<String?> = _agentModel.asStateFlow()
+
     private val _availableProfiles = MutableStateFlow<List<ProfileDto>>(emptyList())
     val availableProfiles: StateFlow<List<ProfileDto>> = _availableProfiles.asStateFlow()
 
@@ -179,6 +182,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val prof = apiClient.fetchProfileInfo(settings.value.serverUrl)
                 if (prof != null) {
                     _agentName.value = prof.name
+                    if (!prof.model.isNullOrBlank()) {
+                        _agentModel.value = prof.model
+                    }
                 }
                 val allProfs = apiClient.fetchAllProfiles(settings.value.serverUrl)
                 if (allProfs.isNotEmpty()) {
@@ -186,6 +192,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     val active = allProfs.firstOrNull { it.active }
                     if (active != null) {
                         _agentName.value = active.name
+                        if (!active.model.isNullOrBlank()) {
+                            _agentModel.value = active.model
+                        }
                     }
                 }
             } catch (_: Exception) {}

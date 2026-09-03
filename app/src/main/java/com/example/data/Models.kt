@@ -72,7 +72,8 @@ data class EndpointProbeResult(
 data class ProfileDto(
     val id: String,
     val name: String,
-    val active: Boolean = false
+    val active: Boolean = false,
+    val model: String = ""
 )
 
 @Serializable

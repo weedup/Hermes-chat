@@ -160,6 +160,7 @@ fun ChatScreen(
     val settings by viewModel.settings.collectAsState()
     val isSPenHovering by viewModel.isSPenHovering.collectAsState()
     val agentName by viewModel.agentName.collectAsState()
+    val agentModel by viewModel.agentModel.collectAsState()
     val availableProfiles by viewModel.availableProfiles.collectAsState()
     val pendingCount by viewModel.pendingCount.collectAsState()
 
@@ -448,6 +449,7 @@ fun ChatScreen(
                             items(messages, key = { it.id }) { message ->
                                 MessageBubble(
                                     message = message,
+                                    agentModel = agentModel,
                                     availableProfiles = availableProfiles,
                                     onSelectProfile = { profId, profName ->
                                         viewModel.switchProfile(profId, profName)
@@ -721,9 +723,25 @@ fun ChatTopBar(
     }
 }
 
+/**
+ * Rótulo do modelo a mostrar junto à bolha do agente.
+ * Prioridade: modelo real do perfil ativo (ponte) → modelo da própria mensagem
+ * (se não for placeholder) → "Hermes". Encurta o prefixo "deepseek/" para caber.
+ */
+private fun modelLabel(agentModel: String?, messageModel: String): String {
+    val candidates = listOfNotNull(
+        agentModel?.takeIf { it.isNotBlank() },
+        messageModel.takeIf { it.isNotBlank() && it != "hermes-agent" }
+    )
+    val chosen = candidates.firstOrNull()
+        ?: return "Hermes"
+    return chosen.removePrefix("deepseek/").removePrefix("anthropic/").removePrefix("openai/").take(28)
+}
+
 @Composable
 fun MessageBubble(
     message: ChatMessage,
+    agentModel: String?,
     availableProfiles: List<ProfileDto>,
     onSelectProfile: (String, String) -> Unit,
     hapticHelper: HapticHelper,
@@ -757,7 +775,7 @@ fun MessageBubble(
                 modifier = Modifier.size(13.dp)
             )
             Text(
-                text = if (isUser) "Tu" else "Hermes",
+                text = if (isUser) "Tu" else modelLabel(agentModel, message.modelName),
                 color = if (isUser) GoldPrimary else GoldAccent,
                 fontSize = 11.5.sp,
                 fontWeight = FontWeight.Bold

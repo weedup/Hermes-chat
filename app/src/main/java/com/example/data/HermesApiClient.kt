@@ -174,7 +174,29 @@ class HermesApiClient {
 
     suspend fun fetchProfileInfo(baseUrl: String): ProfileDto? = withContext(Dispatchers.IO) {
         val list = fetchProfilesList(baseUrl)
-        return@withContext list?.profiles?.firstOrNull { it.active } ?: list?.profiles?.firstOrNull()
+        val base = list?.profiles?.firstOrNull { it.active } ?: list?.profiles?.firstOrNull()
+        // O /profiles (lista) não traz o modelo; o /profile individual (ponte) devolve
+        // {"name": ..., "model": ...}. Captura o modelo real do perfil ativo.
+        val model = fetchActiveModel(baseUrl)
+        return@withContext base?.copy(model = model ?: base.model) ?: (if (model != null) ProfileDto(id = "default", name = "Agent T", active = true, model = model) else null)
+    }
+
+    /** Lê o modelo real do perfil ativo via GET /profile (ponte 9120). */
+    suspend fun fetchActiveModel(baseUrl: String): String? = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl).removeSuffix("/")
+        try {
+            val response: HttpResponse = client.get("$normalized/profile") {
+                timeout { requestTimeoutMillis = 3_000; connectTimeoutMillis = 3_000 }
+            }
+            if (response.status.isSuccess()) {
+                val element = jsonConfig.parseToJsonElement(response.bodyAsText())
+                if (element is JsonObject) {
+                    val model = element["model"]?.jsonPrimitive?.contentOrNull
+                    if (!model.isNullOrBlank()) return@withContext model
+                }
+            }
+        } catch (_: Exception) {}
+        return@withContext null
     }
 
     suspend fun fetchAllProfiles(baseUrl: String): List<ProfileDto> = withContext(Dispatchers.IO) {
