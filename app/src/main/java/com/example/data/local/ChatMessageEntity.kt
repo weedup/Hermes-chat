@@ -64,6 +64,7 @@ fun ChatMessage.toEntity(): ChatMessageEntity {
         status = status.name,
         latencyMs = latencyMs,
         modelName = modelName,
-        errorDetails = errorDetails
+        errorDetails = errorDetails,
+        reasoning = reasoning
     )
 }

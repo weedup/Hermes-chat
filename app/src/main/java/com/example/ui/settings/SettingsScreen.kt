@@ -173,7 +173,7 @@ fun SettingsScreen(
                 icon = Icons.Default.Wifi
             ) {
                 Text(
-                    text = "Endereço URL do Hermes (Porta 9119):",
+                    text = "Endereço URL do Hermes (Porta 9120 — ponte):",
                     fontSize = 13.sp,
                     color = TextSecondary
                 )
@@ -221,22 +221,22 @@ fun SettingsScreen(
                 ) {
                     QuickUrlChip(
                         label = "Termux Localhost",
-                        url = "http://127.0.0.1:9119/",
-                        isSelected = urlInput == "http://127.0.0.1:9119/",
+                        url = "http://127.0.0.1:9120/",
+                        isSelected = urlInput == "http://127.0.0.1:9120/",
                         onClick = {
-                            urlInput = "http://127.0.0.1:9119/"
-                            viewModel.updateServerUrl("http://127.0.0.1:9119/")
+                            urlInput = "http://127.0.0.1:9120/"
+                            viewModel.updateServerUrl("http://127.0.0.1:9120/")
                             viewModel.hapticHelper.trigger(HapticHelper.HapticType.CLICK, settings.hapticEnabled)
                         }
                     )
 
                     QuickUrlChip(
-                        label = "localhost:9119",
-                        url = "http://localhost:9119/",
-                        isSelected = urlInput == "http://localhost:9119/",
+                        label = "localhost:9120",
+                        url = "http://localhost:9120/",
+                        isSelected = urlInput == "http://localhost:9120/",
                         onClick = {
-                            urlInput = "http://localhost:9119/"
-                            viewModel.updateServerUrl("http://localhost:9119/")
+                            urlInput = "http://localhost:9120/"
+                            viewModel.updateServerUrl("http://localhost:9120/")
                             viewModel.hapticHelper.trigger(HapticHelper.HapticType.CLICK, settings.hapticEnabled)
                         }
                     )
@@ -719,9 +719,9 @@ fun SettingsScreen(
             OutlinedButton(
                 onClick = {
                     viewModel.resetToDefaults()
-                    urlInput = "http://127.0.0.1:9120/"
+                    urlInput = "http://127.0.0.1:9120"
                     modelInput = "hermes-agent"
-                    promptInput = "Tu és o Hermes, um modelo de inteligência artificial de elite a correr localmente no dispositivo via Termux."
+                    promptInput = "Tu és o Hermes, um modelo de inteligência artificial de elite a correr localmente no dispositivo via Termux. Sempre que precisares de pensar ou de usar ferramentas, mostra o teu raciocínio passo a passo dentro de uma secção <thinking>...</thinking>."
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
