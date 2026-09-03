@@ -394,7 +394,7 @@ class HermesApiClient {
                     val responseBody = response.bodyAsText()
                     val reply = parseSuccessfulResponse(responseBody)
                     val latency = System.currentTimeMillis() - startTime
-                    return@withContext Result.success(Pair(reply, latency))
+                    return@withContext Result.success(Triple(reply, latency, null))
                 } else {
                     lastException = Exception("HTTP ${response.status.value} em $targetUrl — verifica o endpoint nas definições (usa AUTO para tentar /v1/chat/completions)")
                 }
