@@ -164,7 +164,18 @@ class HermesApiClient {
         return@withContext null
     }
 
-    suspend fun fetchProfilesList(baseUrl: String): ProfilesResponse? = withContext(Dispatchers.IO) {
+    suspend fun fetchProfileInfo(baseUrl: String): ProfileDto? = withContext(Dispatchers.IO) {
+        val list = fetchProfilesList(baseUrl)
+        return@withContext list?.profiles?.firstOrNull { it.active } ?: list?.profiles?.firstOrNull()
+    }
+
+    suspend fun fetchAllProfiles(baseUrl: String): List<ProfileDto> = withContext(Dispatchers.IO) {
+        return@withContext fetchProfilesList(baseUrl)?.profiles ?: emptyList()
+    }
+
+    suspend fun switchProfile(baseUrl: String, profileId: String): Boolean = selectProfile(baseUrl, profileId)
+
+    suspend fun fetchProfilesList(baseUrl: String): ProfileListResponse? = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl).removeSuffix("/")
         val candidates = listOf("/profiles", "/api/profiles", "/profile")
         for (path in candidates) {
@@ -181,12 +192,12 @@ class HermesApiClient {
                     val element = jsonConfig.parseToJsonElement(text)
                     if (element is JsonObject) {
                         if (element.containsKey("profiles")) {
-                            return@withContext jsonConfig.decodeFromString<ProfilesResponse>(text)
+                            return@withContext jsonConfig.decodeFromString<ProfileListResponse>(text)
                         } else if (element.containsKey("name") || element.containsKey("profile")) {
                             val name = element["alias"]?.jsonPrimitive?.contentOrNull
                                 ?: element["name"]?.jsonPrimitive?.contentOrNull ?: "Hermes"
                             val prof = element["profile"]?.jsonPrimitive?.contentOrNull ?: "default"
-                            return@withContext ProfilesResponse(
+                            return@withContext ProfileListResponse(
                                 current = prof,
                                 profiles = listOf(
                                     ProfileDto(id = "default", name = if (prof == "default") name else "Agent T", active = (prof == "default")),
@@ -198,7 +209,7 @@ class HermesApiClient {
                 }
             } catch (_: Exception) {}
         }
-        return@withContext ProfilesResponse(
+        return@withContext ProfileListResponse(
             current = "default",
             profiles = listOf(
                 ProfileDto(id = "default", name = "Agent T", active = true),

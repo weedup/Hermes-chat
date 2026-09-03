@@ -59,7 +59,8 @@ data class EndpointProbeResult(
     val path: String,
     val method: String,
     val statusCode: Int?,
-    val isAvailable: Boolean,
+    val isSuccess: Boolean,
+    val message: String = "",
     val latencyMs: Long,
     val sampleResponse: String? = null,
     val error: String? = null
@@ -69,11 +70,65 @@ data class EndpointProbeResult(
 data class ProfileDto(
     val id: String,
     val name: String,
-    val active: Boolean
+    val active: Boolean = false
 )
 
 @Serializable
-data class ProfilesResponse(
-    val current: String,
-    val profiles: List<ProfileDto>
+data class ProfileListResponse(
+    val current: String = "default",
+    val profiles: List<ProfileDto> = emptyList()
+)
+
+// OpenAI / Hermes Compatible DTOs
+@Serializable
+data class OpenAiChatRequest(
+    val model: String,
+    val messages: List<OpenAiMessage>,
+    val temperature: Float = 0.7f,
+    val maxTokens: Int = 2048,
+    val stream: Boolean = false
+)
+
+@Serializable
+data class OpenAiMessage(
+    val role: String,
+    val content: String
+)
+
+@Serializable
+data class OpenAiChatResponse(
+    val id: String? = null,
+    val choices: List<OpenAiChoice> = emptyList(),
+    val usage: OpenAiUsage? = null
+)
+
+@Serializable
+data class OpenAiChoice(
+    val index: Int = 0,
+    val message: OpenAiMessage? = null,
+    val delta: OpenAiDelta? = null,
+    val finishReason: String? = null
+)
+
+@Serializable
+data class OpenAiDelta(
+    val role: String? = null,
+    val content: String? = null
+)
+
+@Serializable
+data class OpenAiUsage(
+    val promptTokens: Int = 0,
+    val completionTokens: Int = 0,
+    val totalTokens: Int = 0
+)
+
+@Serializable
+data class ModelsListResponse(
+    val data: List<ModelItem> = emptyList()
+)
+
+@Serializable
+data class ModelItem(
+    val id: String
 )
