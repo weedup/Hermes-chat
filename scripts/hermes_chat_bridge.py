@@ -156,6 +156,30 @@ def _model_default(home):
     return ""
 
 
+def set_active_model(model):
+    if not model:
+        return
+    prof = selected_profile()
+    home = _home_for(prof)
+    cfg_file = os.path.join(home, "config.yaml")
+    if os.path.isfile(cfg_file):
+        try:
+            with open(cfg_file, "r") as f:
+                content = f.read()
+            new_content = re.sub(
+                r"(^model:\s*\n(?:\s+[^\n]*\n)*?\s+default:\s*)[^\n]+",
+                r"\g<1>" + model,
+                content,
+                flags=re.M
+            )
+            with open(cfg_file, "w") as f:
+                f.write(new_content)
+        except Exception:
+            pass
+    with open(MODEL_FILE, "w") as f:
+        f.write(model)
+
+
 def agent_model():
     sm = selected_model()
     if sm:
@@ -390,8 +414,7 @@ class Handler(BaseHTTPRequestHandler):
                 data = json.loads((body or b"{}").decode())
                 model = data.get("model", "").strip()
                 if model:
-                    with open(MODEL_FILE, "w") as f:
-                        f.write(model)
+                    set_active_model(model)
                 _send_json(self, {"success": True, "model": model})
             except Exception as e:
                 _send_json(self, {"success": False, "error": str(e)}, status=400)
