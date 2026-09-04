@@ -25,6 +25,12 @@ interface ChatMessageDao {
     @Query("DELETE FROM chat_messages WHERE id = :id")
     suspend fun deleteMessageById(id: String)
 
+    @Query("SELECT * FROM chat_messages WHERE sessionId = :sessionId AND status IN ('SENDING','STREAMING')")
+    suspend fun getStuckMessages(sessionId: String): List<ChatMessageEntity>
+
+    @Query("UPDATE chat_messages SET status = 'ERROR', errorDetails = 'Interrompida: a app foi reiniciada ou fechada durante a geração' WHERE status IN ('SENDING','STREAMING')")
+    suspend fun rescueStuckMessages(): Int
+
     @Query("DELETE FROM chat_messages WHERE sessionId = :sessionId")
     suspend fun clearMessagesForSession(sessionId: String)
 

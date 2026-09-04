@@ -3,7 +3,12 @@ package com.example.ui.chat
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import android.widget.Toast
+import androidx.annotation.SuppressLint
+import android.window.OnBackInvokedCallback
+import android.window.PRIORITY_OVERLAY
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
@@ -90,6 +95,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -151,6 +157,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@SuppressLint("NewApi")
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ChatScreen(
@@ -182,18 +189,50 @@ fun ChatScreen(
     val pendingCount by viewModel.pendingCount.collectAsState()
 
     val listState = rememberLazyListState()
-    var showClearDialog by remember { mutableStateOf(false) }
-    // remember (não Saveable): o estado do dialog não deve sobreviver a navegação
-    // para Settings e voltar — era isso que reabria a janela ao andar para trás.
-    var showProfileDialog by remember { mutableStateOf(false) }
-    var showModelSheet by remember { mutableStateOf(false) }
-    var showMenu by remember { mutableStateOf(false) }
+    // rememberSaveable: sobrevive a recriações da Activity (trocar de janela,
+    // rotação, voltar de outra app) — com remember simples o menu/dialog evaporava-se.
+    var showClearDialog by rememberSaveable { mutableStateOf(false) }
+    var showProfileDialog by rememberSaveable { mutableStateOf(false) }
+    var showModelSheet by rememberSaveable { mutableStateOf(false) }
+    var showMenu by rememberSaveable { mutableStateOf(false) }
 
-    // Quando o teclado estiver levantado e o utilizador carregar para retroceder/baixar teclado,
-    // esconde apenas o teclado e limpa o foco sem fechar o menu nem as opções ativas.
-    BackHandler(enabled = isImeVisible && (showMenu || showModelSheet || showProfileDialog)) {
-        keyboardController?.hide()
-        focusManager.clearFocus()
+    // Tecla "para trás" com o teclado levantado e um menu/dialog aberto:
+    // esconde SÓ o teclado, sem fechar o menu nem as opções ativas.
+    // O BackHandler() normal perdia esta disputa: ModalBottomSheet/AlertDialog
+    // registam o back handler deles DEPOIS e o último registado ganha.
+    // Com PRIORITY_OVERLAY no dispatcher nativo, este callback vence sempre.
+    // PRIORITY_OVERLAY/OnBackInvokedCallback são API 33+; em phones mais antigos
+    // cai no fallback BackHandler (comportamento anterior).
+    val onBackInvokedDispatcher = if (Build.VERSION.SDK_INT >= 33) {
+        (LocalContext.current as? ComponentActivity)?.onBackInvokedDispatcher
+    } else {
+        null
+    }
+    if (onBackInvokedDispatcher != null) {
+        val hideKeyboardKeepMenus = remember {
+            OnBackInvokedCallback {
+                keyboardController?.hide()
+                focusManager.clearFocus()
+            }
+        }
+        val interceptActive = isImeVisible && (showMenu || showModelSheet || showProfileDialog || showClearDialog)
+        DisposableEffect(onBackInvokedDispatcher, interceptActive) {
+            if (interceptActive) {
+                onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                    PRIORITY_OVERLAY,
+                    hideKeyboardKeepMenus
+                )
+            }
+            onDispose {
+                onBackInvokedDispatcher.unregisterOnBackInvokedCallback(hideKeyboardKeepMenus)
+            }
+        }
+    } else {
+        // Fallback raríssimo (dispatcher indisponível)
+        BackHandler(enabled = isImeVisible && (showMenu || showModelSheet || showProfileDialog || showClearDialog)) {
+            keyboardController?.hide()
+            focusManager.clearFocus()
+        }
     }
 
     // Abre o dialog de perfis quando o ViewModel pede (chip /profile ou comando escrito)
@@ -215,6 +254,11 @@ fun ChatScreen(
             showModelSheet = true
             viewModel.consumeModelDialogEvent()
         }
+    }
+
+    // Fecha a gaveta de conversas quando se muda de sessão/janela
+    LaunchedEffect(currentSessionId) {
+        if (drawerState.isOpen) drawerState.close()
     }
 
     LaunchedEffect(messages.size, isGenerating) {

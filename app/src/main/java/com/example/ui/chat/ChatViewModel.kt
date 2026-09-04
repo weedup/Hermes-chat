@@ -148,6 +148,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             repository.ensureSessionExists("default", "Chat Principal")
+            // Resgata mensagens órfãs (SENDING/STREAMING) de sessões passadas:
+            // passam a ERROR em vez de ficarem com o spinner preso para sempre.
+            repository.rescueStuckMessages()
         }
         checkServerHealth()
         refreshProfileInfo()
@@ -171,6 +174,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectSession(sessionId: String) {
         _currentSessionId.value = sessionId
+        // Finaliza bolhas órfãs da sessão visitada (app morreu/reiniciou a meio da geração)
+        viewModelScope.launch {
+            val stuck = repository.getStuckMessages(sessionId)
+            stuck.forEach { msg ->
+                repository.updateMessage(
+                    msg.copy(
+                        text = if (msg.text.isBlank()) "(geração interrompida pela app)" else msg.text,
+                        status = MessageStatus.ERROR,
+                        errorDetails = "Interrompida: a app foi reiniciada ou fechada durante a geração"
+                    )
+                )
+            }
+        }
     }
 
     fun createNewSession() {

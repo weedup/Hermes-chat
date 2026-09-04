@@ -57,6 +57,14 @@ class ChatRepository(context: Context) {
         dao.deleteMessageById(id)
     }
 
+    suspend fun getStuckMessages(sessionId: String): List<ChatMessage> {
+        return dao.getStuckMessages(sessionId).map { it.toDomain() }
+    }
+
+    suspend fun rescueStuckMessages(): Int {
+        return dao.rescueStuckMessages()
+    }
+
     suspend fun deleteSession(sessionId: String) {
         dao.clearMessagesForSession(sessionId)
         dao.deleteSessionById(sessionId)
