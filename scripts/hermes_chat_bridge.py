@@ -148,9 +148,51 @@ def list_all_profiles():
 
 def list_all_models():
     """Descobre os modelos configurados no Hermes e no gateway upstream."""
-    models_set = set()
+    models_list = []
 
-    # 1. Tentar ler modelos do gateway upstream (8642) se disponível
+    def add_model(m):
+        clean = (m or "").strip()
+        if not clean or clean.lower() in ("hermes-agent", "hermes"):
+            return
+        if clean not in models_list:
+            models_list.append(clean)
+
+    # 1. Modelo ativo do perfil selecionado em primeiro lugar
+    cur_model = agent_model()
+    if cur_model:
+        add_model(cur_model)
+
+    # 2. Ler config.yaml do hermes e dos perfis (com regex simples que não depende de yaml externo)
+    configs = [os.path.join(HERMES_HOME, "config.yaml")]
+    profiles_dir = os.path.join(HERMES_HOME, "profiles")
+    if os.path.isdir(profiles_dir):
+        for d in sorted(os.listdir(profiles_dir)):
+            cfg = os.path.join(profiles_dir, d, "config.yaml")
+            if os.path.isfile(cfg):
+                configs.append(cfg)
+
+    for cfg in configs:
+        try:
+            with open(cfg) as f:
+                txt = f.read()
+            # Modelos sob custom_providers: models: ... ou model: default: ...
+            # Apanha linhas como "      google/gemini-3.8-flash: {}" ou "default: google/gemini-..."
+            for line in txt.splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                if stripped.startswith("default:"):
+                    parts = stripped.split(":", 1)
+                    if len(parts) > 1:
+                        add_model(parts[1].strip().strip("'\""))
+                elif stripped.endswith(": {}") or stripped.endswith(":"):
+                    cand = stripped.split(":", 1)[0].strip().strip("'\"")
+                    if "/" in cand or cand.startswith("gemini-") or cand.startswith("qwen") or cand.startswith("gemma-"):
+                        add_model(cand)
+        except OSError:
+            pass
+
+    # 3. Gateway upstream (8642) se disponível
     try:
         req = urllib.request.Request(
             f"http://{GATEWAY_HOST}:{GATEWAY_PORT}/v1/models",
@@ -164,32 +206,11 @@ def list_all_models():
                 items = data.get("data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
                 for it in items:
                     mid = it.get("id") if isinstance(it, dict) else str(it)
-                    if mid and mid.lower() not in ("hermes-agent", "hermes"):
-                        models_set.add(mid)
+                    add_model(mid)
     except Exception:
         pass
 
-    # 2. Ler config.yaml do hermes e dos perfis
-    configs = [os.path.join(HERMES_HOME, "config.yaml")]
-    profiles_dir = os.path.join(HERMES_HOME, "profiles")
-    if os.path.isdir(profiles_dir):
-        for d in os.listdir(profiles_dir):
-            cfg = os.path.join(profiles_dir, d, "config.yaml")
-            if os.path.isfile(cfg):
-                configs.append(cfg)
-
-    for cfg in configs:
-        try:
-            with open(cfg) as f:
-                txt = f.read()
-            for m in re.findall(r"model:\s*(\S+)", txt):
-                clean = m.strip().strip("'\"")
-                if clean and clean.lower() not in ("hermes-agent", "hermes"):
-                    models_set.add(clean)
-        except OSError:
-            pass
-
-    # 3. Modelos populares conhecidos para complementar a lista
+    # 4. Modelos populares conhecidos de fallback
     default_catalog = [
         "nousresearch/hermes-3-llama-3.1-8b",
         "nousresearch/hermes-3-llama-3.1-70b",
@@ -204,15 +225,12 @@ def list_all_models():
         "openai/gpt-4o-mini",
         "anthropic/claude-3-5-sonnet"
     ]
-
-    result_list = list(models_set)
     for dm in default_catalog:
-        if dm not in result_list:
-            result_list.append(dm)
+        add_model(dm)
 
     return {
         "object": "list",
-        "data": [{"id": m, "object": "model"} for m in result_list]
+        "data": [{"id": m, "object": "model"} for m in models_list]
     }
 
 

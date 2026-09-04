@@ -349,7 +349,6 @@ fun ChatScreen(
                     .fillMaxSize()
                     .statusBarsPadding()
                     .navigationBarsPadding()
-                    .imePadding()
             ) {
                 // Header Bar
                 ChatTopBar(
@@ -576,7 +575,8 @@ fun ChatScreen(
                     hapticHelper = viewModel.hapticHelper,
                     onTextChanged = viewModel::onInputChanged,
                     onSend = { viewModel.sendMessage() },
-                    onSPenHover = viewModel::setSPenHover
+                    onSPenHover = viewModel::setSPenHover,
+                    modifier = Modifier.imePadding()
                 )
             }
         }
