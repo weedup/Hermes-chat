@@ -724,18 +724,46 @@ fun ChatTopBar(
 }
 
 /**
- * Rótulo do modelo a mostrar junto à bolha do agente.
- * Prioridade: modelo real do perfil ativo (ponte) → modelo da própria mensagem
- * (se não for placeholder) → "Hermes". Encurta o prefixo "deepseek/" para caber.
+ * Formata o nome do modelo para apresentação limpa e legível por baixo da caixa de resposta.
+ * Remove prefixos de provedores (ex: deepseek/, openai/) e capitaliza siglas comuns (R1, V3, GPT, AI).
  */
-private fun modelLabel(agentModel: String?, messageModel: String): String {
-    val candidates = listOfNotNull(
-        agentModel?.takeIf { it.isNotBlank() },
-        messageModel.takeIf { it.isNotBlank() && it != "hermes-agent" }
-    )
-    val chosen = candidates.firstOrNull()
-        ?: return "Hermes"
-    return chosen.removePrefix("deepseek/").removePrefix("anthropic/").removePrefix("openai/").take(28)
+fun formatModelDisplayName(messageModel: String?, agentModel: String?): String {
+    val raw = messageModel?.takeIf { it.isNotBlank() && it != "hermes-agent" && it != "hermes" }
+        ?: agentModel?.takeIf { it.isNotBlank() && it != "hermes-agent" && it != "hermes" }
+        ?: messageModel?.takeIf { it.isNotBlank() }
+        ?: agentModel?.takeIf { it.isNotBlank() }
+        ?: "Hermes AI"
+
+    if (raw.equals("hermes-agent", ignoreCase = true) || raw.equals("hermes", ignoreCase = true) || raw.equals("Hermes AI", ignoreCase = true)) {
+        return "Hermes AI"
+    }
+
+    val withoutPrefix = raw
+        .removePrefix("deepseek/")
+        .removePrefix("anthropic/")
+        .removePrefix("openai/")
+        .removePrefix("meta-llama/")
+        .removePrefix("qwen/")
+        .removePrefix("mistralai/")
+        .removePrefix("google/")
+
+    return withoutPrefix
+        .replace("-", " ")
+        .replace("_", " ")
+        .split(" ")
+        .filter { it.isNotBlank() }
+        .joinToString(" ") { word ->
+            when {
+                word.equals("ai", ignoreCase = true) -> "AI"
+                word.matches(Regex("^[rR][0-9]+.*")) -> word.uppercase()
+                word.matches(Regex("^[0-9]+[bB]$")) -> word.uppercase()
+                word.equals("gpt", ignoreCase = true) -> "GPT"
+                word.equals("r1", ignoreCase = true) -> "R1"
+                word.equals("v3", ignoreCase = true) -> "V3"
+                word.equals("deepseek", ignoreCase = true) -> "DeepSeek"
+                else -> word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+            }
+        }
 }
 
 @Composable
@@ -759,6 +787,10 @@ fun MessageBubble(
         sdf.format(Date(message.timestamp))
     }
 
+    val modelFormatted = remember(message.modelName, agentModel) {
+        formatModelDisplayName(message.modelName, agentModel)
+    }
+
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
@@ -775,7 +807,7 @@ fun MessageBubble(
                 modifier = Modifier.size(13.dp)
             )
             Text(
-                text = if (isUser) "Tu" else modelLabel(agentModel, message.modelName),
+                text = if (isUser) "Tu" else "Hermes",
                 color = if (isUser) GoldPrimary else GoldAccent,
                 fontSize = 11.5.sp,
                 fontWeight = FontWeight.Bold
@@ -921,7 +953,7 @@ fun MessageBubble(
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
-                text = if (!isUser) "$timeFormatted • Hermes AI" else timeFormatted,
+                text = if (!isUser) "$timeFormatted • $modelFormatted" else timeFormatted,
                 color = TextTertiary,
                 fontSize = 10.5.sp,
                 fontWeight = FontWeight.Medium

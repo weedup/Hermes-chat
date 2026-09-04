@@ -274,7 +274,7 @@ class HermesApiClient {
         temperature: Float,
         maxTokens: Int,
         customEndpoint: String = "AUTO"
-    ): Result<Triple<String, Long, String?>> = withContext(Dispatchers.IO) {
+    ): Result<SendMessageResult> = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl).removeSuffix("/")
         val startTime = System.currentTimeMillis()
 
@@ -326,7 +326,7 @@ class HermesApiClient {
             try {
                 if (isStreaming && isOpenAi) {
                     try {
-                        val streamResult: Result<Triple<String, Long, String>>? = client.preparePost(targetUrl) {
+                        val streamResult: Result<SendMessageResult>? = client.preparePost(targetUrl) {
                             contentType(ContentType.Application.Json)
                             header(HttpHeaders.Accept, "text/event-stream")
                             // Sem gzip e sem bufferização intermediária
@@ -339,11 +339,10 @@ class HermesApiClient {
                                 return@execute null
                             }
                             val channel = response.bodyAsChannel()
-                            val fullReply = StringBuilder()
-                            val reasoningBuf = StringBuilder()
+                            val thoughtFilter = StreamingThoughtFilter()
                             val toolCallsBuf = StringBuilder()
                             var firstToolSeen = false
-                            var inThinkBlock = false
+                            var capturedModel: String? = null
 
                             while (!channel.isClosedForRead) {
                                 val line = channel.readUTF8Line() ?: break
@@ -358,6 +357,9 @@ class HermesApiClient {
 
                                         try {
                                             val streamResponse = jsonConfig.decodeFromString<OpenAiChatResponse>(dataContent)
+                                            if (!streamResponse.model.isNullOrBlank()) {
+                                                capturedModel = streamResponse.model
+                                            }
                                             val delta = streamResponse.choices.firstOrNull()?.delta
                                             deltaText = delta?.content
                                             reasoningText = delta?.reasoningContent ?: delta?.reasoning ?: delta?.thought
@@ -380,6 +382,10 @@ class HermesApiClient {
                                             try {
                                                 val el = jsonConfig.parseToJsonElement(dataContent)
                                                 if (el is JsonObject) {
+                                                    val mStr = el["model"]?.jsonPrimitive?.contentOrNull
+                                                    if (!mStr.isNullOrBlank()) {
+                                                        capturedModel = mStr
+                                                    }
                                                     val firstChoice = el["choices"]?.jsonArray?.firstOrNull()?.jsonObject
                                                     val deltaObj = firstChoice?.get("delta")?.jsonObject
                                                     deltaText = deltaObj?.get("content")?.jsonPrimitive?.contentOrNull
@@ -390,69 +396,60 @@ class HermesApiClient {
                                             } catch (_: Exception) {}
                                         }
 
-                                        // Caso 1: Raciocínio explícito do campo reasoning_content/reasoning/thought
+                                        // Raciocínio explícito do campo reasoning_content/reasoning/thought
                                         if (!reasoningText.isNullOrEmpty()) {
-                                            reasoningBuf.append(reasoningText)
-                                            withContext(Dispatchers.Main) {
-                                                onReasoningChunk?.invoke(reasoningBuf.toString())
+                                            thoughtFilter.feedDirectReasoning(reasoningText) { currentThought ->
+                                                withContext(Dispatchers.Main) {
+                                                    onReasoningChunk?.invoke(currentThought)
+                                                }
                                             }
                                         }
 
-                                        // Caso 2: Conteúdo de texto com suporte em tempo real para tags <think>...</think>
-                                        val nonNullDelta = deltaText
-                                        if (nonNullDelta != null && nonNullDelta.isNotEmpty()) {
-                                            var remaining: String = nonNullDelta
-                                            while (remaining.isNotEmpty()) {
-                                                if (!inThinkBlock) {
-                                                    val thinkIdx = remaining.indexOf("<think>")
-                                                    if (thinkIdx != -1) {
-                                                        val pre = remaining.substring(0, thinkIdx)
-                                                        if (pre.isNotEmpty()) {
-                                                            fullReply.append(pre)
-                                                            withContext(Dispatchers.Main) {
-                                                                onStreamChunk?.invoke(pre)
-                                                            }
-                                                        }
-                                                        inThinkBlock = true
-                                                        remaining = remaining.substring(thinkIdx + 7)
-                                                    } else {
-                                                        fullReply.append(remaining)
-                                                        withContext(Dispatchers.Main) {
-                                                            onStreamChunk?.invoke(remaining)
-                                                        }
-                                                        remaining = ""
+                                        // Conteúdo de texto com filtragem em tempo real de tags <thinking>...</thinking>
+                                        if (!deltaText.isNullOrEmpty()) {
+                                            thoughtFilter.feed(
+                                                chunk = deltaText,
+                                                onTextDelta = { cleanChunk ->
+                                                    withContext(Dispatchers.Main) {
+                                                        onStreamChunk?.invoke(cleanChunk)
                                                     }
-                                                } else {
-                                                    val closeIdx = remaining.indexOf("</think>")
-                                                    if (closeIdx != -1) {
-                                                        val thoughtPart = remaining.substring(0, closeIdx)
-                                                        if (thoughtPart.isNotEmpty()) {
-                                                            reasoningBuf.append(thoughtPart)
-                                                            withContext(Dispatchers.Main) {
-                                                                onReasoningChunk?.invoke(reasoningBuf.toString())
-                                                            }
-                                                        }
-                                                        inThinkBlock = false
-                                                        remaining = remaining.substring(closeIdx + 8)
-                                                    } else {
-                                                        reasoningBuf.append(remaining)
-                                                        withContext(Dispatchers.Main) {
-                                                            onReasoningChunk?.invoke(reasoningBuf.toString())
-                                                        }
-                                                        remaining = ""
+                                                },
+                                                onThoughtUpdated = { currentThought ->
+                                                    withContext(Dispatchers.Main) {
+                                                        onReasoningChunk?.invoke(currentThought)
                                                     }
                                                 }
-                                            }
+                                            )
                                         }
                                     } catch (_: Exception) {}
                                 }
                             }
 
-                            val replyText = fullReply.toString()
-                            val reasoningTextTotal = reasoningBuf.toString()
+                            thoughtFilter.finish(
+                                onTextDelta = { cleanChunk ->
+                                    withContext(Dispatchers.Main) {
+                                        onStreamChunk?.invoke(cleanChunk)
+                                    }
+                                },
+                                onThoughtUpdated = { currentThought ->
+                                    withContext(Dispatchers.Main) {
+                                        onReasoningChunk?.invoke(currentThought)
+                                    }
+                                }
+                            )
+
+                            val replyText = thoughtFilter.textAccumulator.toString().trim()
+                            val reasoningTextTotal = thoughtFilter.thoughtAccumulator.toString().trim()
                             if (replyText.isNotBlank() || reasoningTextTotal.isNotBlank()) {
                                 val latency = System.currentTimeMillis() - startTime
-                                Result.success(Triple(replyText, latency, reasoningTextTotal))
+                                Result.success(
+                                    SendMessageResult(
+                                        reply = replyText,
+                                        latencyMs = latency,
+                                        reasoning = reasoningTextTotal.takeIf { it.isNotBlank() },
+                                        modelName = capturedModel
+                                    )
+                                )
                             } else {
                                 null
                             }
@@ -473,9 +470,16 @@ class HermesApiClient {
 
                 if (response.status.isSuccess()) {
                     val responseBody = response.bodyAsText()
-                    val (reply, reasoning) = parseSuccessfulResponseWithReasoning(responseBody)
+                    val (reply, reasoning, modelFromResp) = parseSuccessfulResponseWithReasoning(responseBody)
                     val latency = System.currentTimeMillis() - startTime
-                    return@withContext Result.success(Triple(reply, latency, reasoning ?: ""))
+                    return@withContext Result.success(
+                        SendMessageResult(
+                            reply = reply,
+                            latencyMs = latency,
+                            reasoning = reasoning,
+                            modelName = modelFromResp
+                        )
+                    )
                 } else {
                     lastException = Exception("HTTP ${response.status.value} em $targetUrl — verifica o endpoint nas definições (usa AUTO para tentar /v1/chat/completions)")
                 }
@@ -488,10 +492,11 @@ class HermesApiClient {
         return@withContext Result.failure(lastException ?: Exception("Falha de ligação ao Hermes (nenhum endpoint respondeu em $normalized)"))
     }
 
-    private fun parseSuccessfulResponseWithReasoning(body: String): Pair<String, String?> {
+    private fun parseSuccessfulResponseWithReasoning(body: String): Triple<String, String?, String?> {
         try {
             val jsonElement = jsonConfig.parseToJsonElement(body)
             if (jsonElement is JsonObject) {
+                val respModel = jsonElement["model"]?.jsonPrimitive?.contentOrNull
                 val choices = jsonElement["choices"]?.jsonArray
                 val msgObj = choices?.firstOrNull()?.jsonObject?.get("message")?.jsonObject
                 val messageContent = msgObj?.get("content")?.jsonPrimitive?.contentOrNull
@@ -501,28 +506,20 @@ class HermesApiClient {
 
                 if (!messageContent.isNullOrBlank()) {
                     if (!reasoningContent.isNullOrBlank()) {
-                        return Pair(messageContent, reasoningContent)
+                        return Triple(messageContent, reasoningContent, respModel)
                     }
-                    val oIdx = messageContent.indexOf("<think>")
-                    val cIdx = messageContent.indexOf("</think>")
-                    if (oIdx != -1 && cIdx != -1 && cIdx > oIdx) {
-                        val thought = messageContent.substring(oIdx + 7, cIdx).trim()
-                        val before = messageContent.substring(0, oIdx).trim()
-                        val after = messageContent.substring(cIdx + 8).trim()
-                        val clean = if (before.isNotEmpty() && after.isNotEmpty()) "$before\n\n$after" else "$before$after"
-                        return Pair(clean, thought)
-                    }
-                    return Pair(messageContent, null)
+                    val extracted = com.example.ui.components.extractThoughtAndResponse(messageContent)
+                    return Triple(extracted.cleanResponse, extracted.thought, respModel)
                 }
 
                 val textDirect = jsonElement["text"]?.jsonPrimitive?.contentOrNull
-                if (!textDirect.isNullOrBlank()) return Pair(textDirect, null)
+                if (!textDirect.isNullOrBlank()) return Triple(textDirect, null, respModel)
 
                 val responseDirect = jsonElement["response"]?.jsonPrimitive?.contentOrNull
-                if (!responseDirect.isNullOrBlank()) return Pair(responseDirect, null)
+                if (!responseDirect.isNullOrBlank()) return Triple(responseDirect, null, respModel)
             }
         } catch (_: Exception) {}
-        return Pair(body, null)
+        return Triple(body, null, null)
     }
 
     private fun parseSuccessfulResponse(body: String): String {
@@ -640,5 +637,166 @@ class HermesApiClient {
             }
         } catch (_: Exception) {}
         return@withContext listOf("hermes-agent", "hermes-3")
+    }
+}
+
+/**
+ * Filtro resiliente para streaming em tempo real que extrai tags de raciocínio
+ * (<thinking>...</thinking>, <think>...</think>, <thought>...</thought>)
+ * sem misturar raciocínio com o texto final da resposta, mesmo quando as tags
+ * chegam divididas entre múltiplos chunks do socket SSE.
+ */
+class StreamingThoughtFilter {
+    companion object {
+        private val OPEN_TAGS = listOf("<thinking>", "<think>", "<thought>")
+        private val CLOSE_TAGS = listOf("</thinking>", "</think>", "</thought>")
+        private const val MAX_PREFIX_LEN = 12
+    }
+
+    var inThought: Boolean = false
+        private set
+
+    private var pending: String = ""
+    val textAccumulator = StringBuilder()
+    val thoughtAccumulator = StringBuilder()
+
+    suspend fun feedDirectReasoning(reasoning: String, onThoughtUpdated: suspend (String) -> Unit) {
+        if (reasoning.isNotEmpty()) {
+            thoughtAccumulator.append(reasoning)
+            onThoughtUpdated(thoughtAccumulator.toString())
+        }
+    }
+
+    suspend fun feed(
+        chunk: String,
+        onTextDelta: suspend (String) -> Unit,
+        onThoughtUpdated: suspend (String) -> Unit
+    ) {
+        var buffer = pending + chunk
+        pending = ""
+
+        while (buffer.isNotEmpty()) {
+            if (!inThought) {
+                var earliestIdx = -1
+                var matchedTag = ""
+                for (tag in OPEN_TAGS) {
+                    val idx = buffer.indexOf(tag, ignoreCase = true)
+                    if (idx != -1 && (earliestIdx == -1 || idx < earliestIdx)) {
+                        earliestIdx = idx
+                        matchedTag = tag
+                    }
+                }
+
+                if (earliestIdx != -1) {
+                    val pre = buffer.substring(0, earliestIdx)
+                    if (pre.isNotEmpty()) {
+                        textAccumulator.append(pre)
+                        onTextDelta(pre)
+                    }
+                    inThought = true
+                    buffer = buffer.substring(earliestIdx + matchedTag.length)
+                    if (buffer.startsWith("\r\n")) buffer = buffer.substring(2)
+                    else if (buffer.startsWith("\n")) buffer = buffer.substring(1)
+                } else {
+                    val prefix = findPossibleOpenTagPrefix(buffer)
+                    if (prefix != null) {
+                        val safeText = buffer.substring(0, buffer.length - prefix.length)
+                        if (safeText.isNotEmpty()) {
+                            textAccumulator.append(safeText)
+                            onTextDelta(safeText)
+                        }
+                        pending = prefix
+                        buffer = ""
+                    } else {
+                        textAccumulator.append(buffer)
+                        onTextDelta(buffer)
+                        buffer = ""
+                    }
+                }
+            } else {
+                var earliestCloseIdx = -1
+                var matchedCloseTag = ""
+                for (tag in CLOSE_TAGS) {
+                    val idx = buffer.indexOf(tag, ignoreCase = true)
+                    if (idx != -1 && (earliestCloseIdx == -1 || idx < earliestCloseIdx)) {
+                        earliestCloseIdx = idx
+                        matchedCloseTag = tag
+                    }
+                }
+
+                if (earliestCloseIdx != -1) {
+                    val thoughtPart = buffer.substring(0, earliestCloseIdx)
+                    if (thoughtPart.isNotEmpty()) {
+                        thoughtAccumulator.append(thoughtPart)
+                        onThoughtUpdated(thoughtAccumulator.toString())
+                    }
+                    inThought = false
+                    buffer = buffer.substring(earliestCloseIdx + matchedCloseTag.length)
+                    if (buffer.startsWith("\r\n")) buffer = buffer.substring(2)
+                    else if (buffer.startsWith("\n")) buffer = buffer.substring(1)
+                } else {
+                    val prefix = findPossibleCloseTagPrefix(buffer)
+                    if (prefix != null) {
+                        val safeThought = buffer.substring(0, buffer.length - prefix.length)
+                        if (safeThought.isNotEmpty()) {
+                            thoughtAccumulator.append(safeThought)
+                            onThoughtUpdated(thoughtAccumulator.toString())
+                        }
+                        pending = prefix
+                        buffer = ""
+                    } else {
+                        thoughtAccumulator.append(buffer)
+                        onThoughtUpdated(thoughtAccumulator.toString())
+                        buffer = ""
+                    }
+                }
+            }
+        }
+    }
+
+    private fun findPossibleOpenTagPrefix(str: String): String? {
+        val maxLen = minOf(str.length, MAX_PREFIX_LEN)
+        for (len in maxLen downTo 1) {
+            val suffix = str.substring(str.length - len)
+            if (suffix.startsWith("<")) {
+                for (tag in OPEN_TAGS) {
+                    if (tag.startsWith(suffix, ignoreCase = true)) {
+                        return suffix
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    private fun findPossibleCloseTagPrefix(str: String): String? {
+        val maxLen = minOf(str.length, MAX_PREFIX_LEN)
+        for (len in maxLen downTo 1) {
+            val suffix = str.substring(str.length - len)
+            if (suffix.startsWith("<") || suffix.startsWith("</")) {
+                for (tag in CLOSE_TAGS) {
+                    if (tag.startsWith(suffix, ignoreCase = true)) {
+                        return suffix
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    suspend fun finish(
+        onTextDelta: suspend (String) -> Unit,
+        onThoughtUpdated: suspend (String) -> Unit
+    ) {
+        if (pending.isNotEmpty()) {
+            if (inThought) {
+                thoughtAccumulator.append(pending)
+                onThoughtUpdated(thoughtAccumulator.toString())
+            } else {
+                textAccumulator.append(pending)
+                onTextDelta(pending)
+            }
+            pending = ""
+        }
     }
 }

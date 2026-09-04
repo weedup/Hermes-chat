@@ -77,8 +77,14 @@ fun MarkdownMessageView(
     isStreaming: Boolean = false
 ) {
     val thoughtData = remember(text) { extractThoughtAndResponse(text) }
-    val effectiveThought = reasoning?.takeIf { it.isNotBlank() } ?: thoughtData.thought
-    val mainText = if (reasoning != null && reasoning.isNotBlank()) text else thoughtData.cleanResponse
+    val effectiveThought = when {
+        !reasoning.isNullOrBlank() && !thoughtData.thought.isNullOrBlank() -> {
+            if (reasoning.length >= thoughtData.thought.length) reasoning else thoughtData.thought
+        }
+        !reasoning.isNullOrBlank() -> reasoning
+        else -> thoughtData.thought
+    }
+    val mainText = thoughtData.cleanResponse
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // Se houver pensamento, apresenta dropdown colapsável
@@ -218,25 +224,50 @@ data class ThoughtExtraction(
 )
 
 fun extractThoughtAndResponse(raw: String): ThoughtExtraction {
-    val thinkOpen = "<think>"
-    val thinkClose = "</think>"
-    val openIdx = raw.indexOf(thinkOpen)
-    if (openIdx != -1) {
-        val closeIdx = raw.indexOf(thinkClose, openIdx + thinkOpen.length)
-        if (closeIdx != -1) {
-            val thought = raw.substring(openIdx + thinkOpen.length, closeIdx).trim()
-            val before = raw.substring(0, openIdx).trim()
-            val after = raw.substring(closeIdx + thinkClose.length).trim()
-            val clean = if (before.isNotEmpty() && after.isNotEmpty()) "$before\n\n$after" else "$before$after"
-            return ThoughtExtraction(thought = thought, cleanResponse = clean)
-        } else {
-            // Em streaming ainda não fechou </think>
-            val thought = raw.substring(openIdx + thinkOpen.length).trim()
-            val before = raw.substring(0, openIdx).trim()
-            return ThoughtExtraction(thought = thought, cleanResponse = before)
+    if (raw.isBlank()) return ThoughtExtraction(thought = null, cleanResponse = "")
+
+    val tagPairs = listOf(
+        Pair("<thinking>", "</thinking>"),
+        Pair("<think>", "</think>"),
+        Pair("<thought>", "</thought>")
+    )
+
+    for ((openTag, closeTag) in tagPairs) {
+        val openIdx = raw.indexOf(openTag, ignoreCase = true)
+        if (openIdx != -1) {
+            val closeIdx = raw.indexOf(closeTag, openIdx + openTag.length, ignoreCase = true)
+            if (closeIdx != -1) {
+                val thought = raw.substring(openIdx + openTag.length, closeIdx).trim()
+                val before = raw.substring(0, openIdx).trim()
+                val after = raw.substring(closeIdx + closeTag.length).trim()
+                val remainingRaw = when {
+                    before.isNotEmpty() && after.isNotEmpty() -> "$before\n\n$after"
+                    before.isNotEmpty() -> before
+                    else -> after
+                }
+                // Recursivamente limpar mais blocos se houver
+                val nested = extractThoughtAndResponse(remainingRaw)
+                val combinedThought = if (!nested.thought.isNullOrBlank()) {
+                    "$thought\n\n${nested.thought}".trim()
+                } else {
+                    thought
+                }
+                return ThoughtExtraction(thought = combinedThought.takeIf { it.isNotBlank() }, cleanResponse = nested.cleanResponse)
+            } else {
+                // Em streaming ou corte parcial: tag ainda não foi fechada
+                val thought = raw.substring(openIdx + openTag.length).trim()
+                val before = raw.substring(0, openIdx).trim()
+                return ThoughtExtraction(thought = thought.takeIf { it.isNotBlank() }, cleanResponse = before)
+            }
         }
     }
-    return ThoughtExtraction(thought = null, cleanResponse = raw)
+
+    // Limpar possíveis sobras de tags isoladas ou sufixos
+    val sanitized = raw
+        .replace(Regex("</?(?:thinking|think|thought)>", RegexOption.IGNORE_CASE), "")
+        .trim()
+
+    return ThoughtExtraction(thought = null, cleanResponse = sanitized)
 }
 
 @Composable

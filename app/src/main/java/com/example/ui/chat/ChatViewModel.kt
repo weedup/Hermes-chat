@@ -354,6 +354,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             status = MessageStatus.SENT
         )
 
+        val initialModel = _agentModel.value?.takeIf { it.isNotBlank() }
+            ?: settings.value.modelName.takeIf { it.isNotBlank() && it != "hermes-agent" }
+            ?: settings.value.modelName
+
         val hermesMsgId = UUID.randomUUID().toString()
         val pendingHermesMsg = ChatMessage(
             id = hermesMsgId,
@@ -362,7 +366,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             sender = MessageSender.HERMES,
             timestamp = System.currentTimeMillis() + 1,
             status = MessageStatus.SENDING,
-            modelName = settings.value.modelName
+            modelName = initialModel
         )
 
         viewModelScope.launch {
@@ -425,11 +429,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 viewModelScope.launch { _liveToolUse.value = toolsText }
             }
 
+            val modelToUse = _agentModel.value?.takeIf { it.isNotBlank() } ?: currentSettings.modelName
+
             val result = apiClient.sendMessage(
                 baseUrl = currentSettings.serverUrl,
                 history = history,
                 userPrompt = textToSend,
-                model = currentSettings.modelName,
+                model = modelToUse,
                 systemPrompt = currentSettings.systemPrompt,
                 temperature = currentSettings.temperature,
                 maxTokens = currentSettings.maxTokens,
@@ -439,16 +445,38 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _isGenerating.value = false
 
             if (result.isSuccess) {
-                val (reply, latency, reasoning) = result.getOrThrow()
+                val sendResult = result.getOrThrow()
+                val reply = sendResult.reply
+                val latency = sendResult.latencyMs
+                val reasoning = sendResult.reasoning
+                val returnedModel = sendResult.modelName
+
                 _liveThinking.value = null
                 _liveToolUse.value = null
                 _finalThinking.value = null
-                val finalReasoning = reasoning?.takeIf { it.isNotBlank() } ?: currentReasoning.takeIf { it.isNotBlank() }
+
+                val rawText = if (accumulatedText.isNotBlank()) accumulatedText else reply
+                val extraction = com.example.ui.components.extractThoughtAndResponse(rawText)
+                val cleanText = extraction.cleanResponse
+                val finalReasoning = reasoning?.takeIf { it.isNotBlank() }
+                    ?: extraction.thought?.takeIf { it.isNotBlank() }
+                    ?: currentReasoning.takeIf { it.isNotBlank() }
+
+                val finalModel = returnedModel?.takeIf { it.isNotBlank() }
+                    ?: pendingHermesMsg.modelName.takeIf { it.isNotBlank() && it != "hermes-agent" }
+                    ?: _agentModel.value?.takeIf { it.isNotBlank() }
+                    ?: currentSettings.modelName
+
+                if (!returnedModel.isNullOrBlank()) {
+                    _agentModel.value = returnedModel
+                }
+
                 val completedMsg = pendingHermesMsg.copy(
-                    text = if (accumulatedText.isNotBlank()) accumulatedText else reply,
+                    text = cleanText,
                     status = MessageStatus.SENT,
                     latencyMs = latency,
-                    reasoning = finalReasoning
+                    reasoning = finalReasoning,
+                    modelName = finalModel
                 )
                 repository.updateMessage(completedMsg)
 

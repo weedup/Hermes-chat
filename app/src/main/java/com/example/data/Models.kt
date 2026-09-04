@@ -101,8 +101,16 @@ data class OpenAiMessage(
 @Serializable
 data class OpenAiChatResponse(
     val id: String? = null,
+    val model: String? = null,
     val choices: List<OpenAiChoice> = emptyList(),
     val usage: OpenAiUsage? = null
+)
+
+data class SendMessageResult(
+    val reply: String,
+    val latencyMs: Long,
+    val reasoning: String?,
+    val modelName: String? = null
 )
 
 @Serializable
