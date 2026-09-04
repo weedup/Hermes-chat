@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Ponte Hermes-chat: 127.0.0.1:9120 → 127.0.0.1:8642 (gateway OpenAI-compat).
+"""Ponte Hermes-chat: 127.0.0.1:9120 -> 127.0.0.1:8642 (gateway OpenAI-compat).
 Injeta API_SERVER_KEY do .env do Hermes. Serve /profile (nome do agente via
-SOUL.md + custom_providers) e /profiles + /profile/select (perfis Hermes).
-Retransmite respostas streaming (SSE) chunk-a-chunk."""
+SOUL.md + config) e /profiles + /profile/select (perfis Hermes).
+Faz proxy transparente de streaming (SSE) e encaminha para o perfil correto
+(/p/<perfil>/v1/...) quando não for o default.
+"""
 import http.client
 import json
 import os
@@ -16,18 +18,17 @@ GATEWAY_HOST = "127.0.0.1"
 GATEWAY_PORT = 8642
 LISTEN = ("127.0.0.1", 9120)
 
-# Dashboard Hermes (admin surface): 9119 em loopback. /api/status é público;
-# os endpoints sensíveis (sessions, cron, skills, analytics…) exigem o token de
-# sessão efémero que o SPA recebe via window.__HERMES_SESSION_TOKEN__ em `/`.
+PROFILE_FILE = os.path.join(HERMES_HOME, ".hermes_chat_profile")
+MODEL_FILE = os.path.join(HERMES_HOME, ".hermes_chat_model")
+
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 9119
 _DASH_TOKEN_CACHE = {"token": None, "ts": 0.0}
 
 
 def _dashboard_token():
-    """Busca o token de sessão do dashboard, com cache curta (efémero — morre
-    quando o dashboard reinicia, por isso não se pode confiar numa cache longa)."""
-    now = __import__("time").time()
+    import time
+    now = time.time()
     if _DASH_TOKEN_CACHE["token"] and now - _DASH_TOKEN_CACHE["ts"] < 30:
         return _DASH_TOKEN_CACHE["token"]
     try:
@@ -43,35 +44,37 @@ def _dashboard_token():
         _DASH_TOKEN_CACHE["token"] = m.group(1)
         _DASH_TOKEN_CACHE["ts"] = now
         return m.group(1)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
 def dashboard(path, timeout=12):
-    """Proxy sensível para o dashboard. Devolve (status, payload-dict)."""
     token = _dashboard_token()
     if not token:
-        return 503, {"error": "dashboard_token_unavailable",
-                     "detail": "Não consegui autenticar no dashboard (9119)."}
+        return 503, {
+            "error": "dashboard_token_unavailable",
+            "detail": "Não consegui autenticar no dashboard (9119)."
+        }
     try:
         req = urllib.request.Request(
             f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}{path}",
-            headers={"X-Hermes-Session-Token": token,
-                     "User-Agent": "hermes-chat-bridge"},
+            headers={
+                "X-Hermes-Session-Token": token,
+                "User-Agent": "hermes-chat-bridge"
+            },
         )
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, json.loads(r.read().decode("utf-8", "replace"))
     except urllib.error.HTTPError as e:
         try:
             return e.code, json.loads(e.read().decode("utf-8", "replace"))
-        except Exception:  # noqa: BLE001
+        except Exception:
             return e.code, {"detail": str(e)}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return 502, {"error": "dashboard_unreachable", "detail": str(e)}
 
 
 def load_api_key():
-    # env primeiro, depois .env do hermes
     k = os.environ.get("API_SERVER_KEY", "").strip()
     if k:
         return k
@@ -105,29 +108,64 @@ def _profile_name_from_folder(folder, default_name):
     return default_name
 
 
-def agent_name():
-    return _profile_name_from_folder(HERMES_HOME, "Hermes")
-
-
-def agent_model():
+def selected_profile():
     try:
-        with open(os.path.join(HERMES_HOME, "config.yaml")) as f:
-            txt = f.read()
-        # primeiro model: depois do custom_providers
-        m = re.search(r"custom_providers:.*?model:\s*(\S+)", txt, re.S)
-        if m:
-            return m.group(1)
-        m = re.search(r"^\s*model:\s*(\S+)", txt, re.M)
-        if m:
-            return m.group(1)
+        with open(PROFILE_FILE) as f:
+            p = f.read().strip()
+    except OSError:
+        return "default"
+    if p and (p == "default" or os.path.isdir(os.path.join(HERMES_HOME, "profiles", p))):
+        return p
+    return "default"
+
+
+def selected_model():
+    try:
+        with open(MODEL_FILE) as f:
+            m = f.read().strip()
+            if m:
+                return m
     except OSError:
         pass
     return ""
 
 
+def _home_for(profile):
+    if profile == "default":
+        return HERMES_HOME
+    return os.path.join(HERMES_HOME, "profiles", profile)
+
+
+def agent_name():
+    p = selected_profile()
+    fallback = "Agent T" if p == "default" else p.capitalize()
+    return _profile_name_from_folder(_home_for(p), fallback)
+
+
+def _model_default(home):
+    try:
+        with open(os.path.join(home, "config.yaml")) as f:
+            txt = f.read()
+    except OSError:
+        return ""
+    m = re.search(r"^model:[ \t]*$\n((?:[ \t]+[^\n]*\n?)*)", txt, re.M)
+    if m:
+        dm = re.search(r"^[ \t]+default:[ \t]*(\S+)", m.group(1), re.M)
+        if dm:
+            return dm.group(1)
+    return ""
+
+
+def agent_model():
+    sm = selected_model()
+    if sm:
+        return sm
+    return _model_default(_home_for(selected_profile()))
+
+
 def list_all_profiles():
     profiles_dir = os.path.join(HERMES_HOME, "profiles")
-    active_profile = os.environ.get("HERMES_PROFILE") or "default"
+    active_profile = selected_profile()
 
     results = [{
         "id": "default",
@@ -147,7 +185,6 @@ def list_all_profiles():
 
 
 def list_all_models():
-    """Descobre os modelos configurados no Hermes e no gateway upstream."""
     models_list = []
 
     def add_model(m):
@@ -157,12 +194,10 @@ def list_all_models():
         if clean not in models_list:
             models_list.append(clean)
 
-    # 1. Modelo ativo do perfil selecionado em primeiro lugar
     cur_model = agent_model()
     if cur_model:
         add_model(cur_model)
 
-    # 2. Ler config.yaml do hermes e dos perfis (com regex simples que não depende de yaml externo)
     configs = [os.path.join(HERMES_HOME, "config.yaml")]
     profiles_dir = os.path.join(HERMES_HOME, "profiles")
     if os.path.isdir(profiles_dir):
@@ -175,8 +210,6 @@ def list_all_models():
         try:
             with open(cfg) as f:
                 txt = f.read()
-            # Modelos sob custom_providers: models: ... ou model: default: ...
-            # Apanha linhas como "      google/gemini-3.8-flash: {}" ou "default: google/gemini-..."
             for line in txt.splitlines():
                 stripped = line.strip()
                 if not stripped or stripped.startswith("#"):
@@ -192,7 +225,6 @@ def list_all_models():
         except OSError:
             pass
 
-    # 3. Gateway upstream (8642) se disponível
     try:
         req = urllib.request.Request(
             f"http://{GATEWAY_HOST}:{GATEWAY_PORT}/v1/models",
@@ -210,7 +242,6 @@ def list_all_models():
     except Exception:
         pass
 
-    # 4. Modelos populares conhecidos de fallback
     default_catalog = [
         "nousresearch/hermes-3-llama-3.1-8b",
         "nousresearch/hermes-3-llama-3.1-70b",
@@ -255,14 +286,32 @@ class Handler(BaseHTTPRequestHandler):
         headers["Content-Type"] = "application/json"
         if API_KEY:
             headers["Authorization"] = "Bearer " + API_KEY
+
+        path = self.path
+        prof = selected_profile()
+        if prof != "default":
+            stripped = path.lstrip("/")
+            if stripped.startswith("v1/"):
+                path = f"/p/{prof}/{stripped}"
+
+        sm = selected_model()
+        if sm and body and b'"messages"' in body:
+            try:
+                data = json.loads(body.decode("utf-8", "replace"))
+                if isinstance(data, dict):
+                    data["model"] = sm
+                    body = json.dumps(data).encode("utf-8")
+            except Exception:
+                pass
+
         conn = http.client.HTTPConnection(GATEWAY_HOST, GATEWAY_PORT, timeout=600)
-        conn.request(self.command, self.path, body=body, headers=headers)
+        conn.request(self.command, path, body=body, headers=headers)
         return conn, conn.getresponse()
 
     def _relay(self, body=None):
         try:
             conn, resp = self._connect_upstream(body)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             _send_json(self, {"error": {"message": str(e)}}, status=502)
             return
 
@@ -279,8 +328,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(key, val)
 
         if is_stream:
-            # Streaming: retransmite cada linha/chunk SSE à medida que chega do gateway
-            # sem bufferizar (readline repassa data: ...\n\n instantaneamente).
             self.send_header("Connection", "close")
             self.send_header("Cache-Control", "no-cache, no-transform")
             self.send_header("X-Accel-Buffering", "no")
@@ -320,8 +367,6 @@ class Handler(BaseHTTPRequestHandler):
             _send_json(self, list_all_models())
             return
 
-        # Rotas de telemetria do dashboard Hermes (proxy autenticado).
-        # A app chama /dashboard/<rota>; expoem-se só as read-only úteis.
         if self.path.rstrip("/") == "/dashboard/status":
             st, payload = dashboard("/api/status", timeout=8)
             _send_json(self, payload, status=st)
@@ -345,40 +390,23 @@ class Handler(BaseHTTPRequestHandler):
                 data = json.loads((body or b"{}").decode())
                 model = data.get("model", "").strip()
                 if model:
-                    try:
-                        import subprocess
-                        subprocess.run(
-                            ["hermes", "model", model],
-                            check=True,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            timeout=5,
-                        )
-                    except Exception:
-                        pass
+                    with open(MODEL_FILE, "w") as f:
+                        f.write(model)
                 _send_json(self, {"success": True, "model": model})
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 _send_json(self, {"success": False, "error": str(e)}, status=400)
             return
         if self.path.rstrip("/") == "/profile/select":
             try:
                 data = json.loads((body or b"{}").decode())
                 prof = data.get("profile", "default")
-                # Tenta mudar o perfil activo via CLI do Hermes.
-                os.environ["HERMES_PROFILE"] = prof
-                try:
-                    import subprocess
-                    subprocess.run(
-                        ["hermes", "profile", "use", prof],
-                        check=True,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        timeout=5,
-                    )
-                except Exception:
-                    pass
+                if prof != "default" and not os.path.isdir(os.path.join(HERMES_HOME, "profiles", prof)):
+                    _send_json(self, {"success": False, "error": f"unknown profile: {prof}"}, status=404)
+                    return
+                with open(PROFILE_FILE, "w") as f:
+                    f.write(prof)
                 _send_json(self, {"success": True, "profile": prof})
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 _send_json(self, {"success": False, "error": str(e)}, status=400)
             return
         self._relay(body)
