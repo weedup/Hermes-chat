@@ -45,6 +45,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChatBubbleOutline
@@ -363,6 +364,11 @@ fun ChatScreen(
                         viewModel.hapticHelper.trigger(HapticHelper.HapticType.LIGHT_TICK, settings.hapticEnabled)
                         viewModel.checkServerHealth()
                     },
+                    onProfileClick = {
+                        viewModel.hapticHelper.trigger(HapticHelper.HapticType.CLICK, settings.hapticEnabled)
+                        viewModel.refreshProfileInfo()
+                        showProfileDialog = true
+                    },
                     onModelClick = {
                         viewModel.hapticHelper.trigger(HapticHelper.HapticType.CLICK, settings.hapticEnabled)
                         viewModel.refreshModels()
@@ -625,10 +631,10 @@ fun ChatScreen(
                         modifier = Modifier.size(22.dp)
                     )
                     Text(
-                        text = "Escolher Perfil / Agente",
+                        text = "Perfil / Agente (Personalidade)",
                         color = TextPrimary,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
+                        fontSize = 17.sp
                     )
                 }
             },
@@ -636,9 +642,23 @@ fun ChatScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 8.dp),
+                        .padding(top = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    Surface(
+                        color = NavySurfaceVariant,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "O perfil define a identidade e alma (SOUL.md). Para mudar o modelo de inteligência artificial (LLM), usa o botão 'Modelo LLM'.",
+                            color = TextSecondary,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                        )
+                    }
+
                     profilesToShow.forEach { prof ->
                         val isSelected = prof.active || (agentName != null && prof.name.equals(agentName, ignoreCase = true))
                         Row(
@@ -668,7 +688,7 @@ fun ChatScreen(
                                     fontSize = 15.sp
                                 )
                                 Text(
-                                    text = "ID: ${prof.id}",
+                                    text = "Perfil: ${prof.id}",
                                     color = TextTertiary,
                                     fontSize = 11.sp
                                 )
@@ -699,22 +719,38 @@ fun ChatScreen(
     if (showModelSheet) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
         var searchQuery by remember { mutableStateOf("") }
+        val defaultCatalog = remember {
+            listOf(
+                "nousresearch/hermes-3-llama-3.1-8b",
+                "nousresearch/hermes-3-llama-3.1-70b",
+                "meta-llama/llama-3.3-70b-instruct",
+                "meta-llama/llama-3.1-8b-instruct",
+                "qwen/qwen-2.5-72b-instruct",
+                "qwen/qwen-2.5-coder-32b-instruct",
+                "deepseek/deepseek-chat",
+                "deepseek/deepseek-r1",
+                "mistralai/mistral-large-2407",
+                "openai/gpt-4o",
+                "openai/gpt-4o-mini",
+                "anthropic/claude-3-5-sonnet"
+            )
+        }
+
         val modelsList = remember(availableModels, settings.modelName, agentModel) {
             val set = linkedSetOf<String>()
-            if (!settings.modelName.isNullOrBlank()) set.add(settings.modelName.trim())
-            if (!agentModel.isNullOrBlank()) set.add(agentModel!!.trim())
-            set.addAll(availableModels)
-            if (set.isEmpty()) {
-                listOf(
-                    "nousresearch/hermes-3-llama-3.1-8b",
-                    "meta-llama/llama-3.1-8b-instruct",
-                    "meta-llama/llama-3.3-70b-instruct",
-                    "qwen/qwen-2.5-72b-instruct",
-                    "mistralai/mistral-large-2407"
-                )
-            } else {
-                set.toList()
+            val currentMod = (agentModel?.takeIf { it.isNotBlank() } ?: settings.modelName).trim()
+            if (currentMod.isNotBlank() && !currentMod.equals("hermes-agent", ignoreCase = true) && !currentMod.equals("hermes", ignoreCase = true)) {
+                set.add(currentMod)
             }
+            // Modelos obtidos do servidor/ponte (sem hermes-agent e sem perfis)
+            availableModels
+                .map { it.trim() }
+                .filter { it.isNotBlank() && !it.equals("hermes-agent", ignoreCase = true) && !it.equals("hermes", ignoreCase = true) }
+                .forEach { set.add(it) }
+
+            // Complementa com o catálogo de modelos reais populares
+            defaultCatalog.forEach { set.add(it) }
+            set.toList()
         }
 
         val filteredModels = remember(modelsList, searchQuery) {
@@ -774,13 +810,13 @@ fun ChatScreen(
                         }
                         Column {
                             Text(
-                                text = "Escolher Modelo",
+                                text = "Escolher Modelo LLM",
                                 color = TextPrimary,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 18.sp
                             )
                             Text(
-                                text = "${modelsList.size} modelo(s) disponível(eis)",
+                                text = "Modelo de IA que responde no Hermes",
                                 color = TextSecondary,
                                 fontSize = 12.sp
                             )
@@ -807,13 +843,13 @@ fun ChatScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Campo de pesquisa
+                // Campo de pesquisa / escrita de modelo personalizado
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Pesquisar modelo...", color = TextTertiary, fontSize = 14.sp) },
+                    placeholder = { Text("Pesquisar ou escrever modelo (ex: llama-3.1)...", color = TextTertiary, fontSize = 13.sp) },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Search,
@@ -848,10 +884,56 @@ fun ChatScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                // Se o utilizador escreveu um modelo que não está na lista exata, permitir usá-lo diretamente
+                val trimmedQuery = searchQuery.trim()
+                if (trimmedQuery.isNotBlank() && modelsList.none { it.equals(trimmedQuery, ignoreCase = true) }) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        color = GoldPrimary.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, GoldPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                viewModel.hapticHelper.trigger(HapticHelper.HapticType.CLICK, settings.hapticEnabled)
+                                viewModel.selectModel(trimmedQuery)
+                                showModelSheet = false
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(Icons.Default.Add, null, tint = GoldPrimary, modifier = Modifier.size(18.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Usar Modelo Personalizado:",
+                                    color = GoldPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    text = trimmedQuery,
+                                    color = TextPrimary,
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            Text(
+                                text = "Ativar",
+                                color = GoldPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Lista de modelos
-                if (filteredModels.isEmpty()) {
+                if (filteredModels.isEmpty() && trimmedQuery.isBlank()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -859,7 +941,7 @@ fun ChatScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (searchQuery.isBlank()) "Nenhum modelo encontrado" else "Nenhum modelo corresponde a '$searchQuery'",
+                            text = "Nenhum modelo disponível",
                             color = TextTertiary,
                             fontSize = 14.sp
                         )
@@ -873,8 +955,8 @@ fun ChatScreen(
                         contentPadding = PaddingValues(bottom = 24.dp)
                     ) {
                         items(filteredModels, key = { it }) { modelItem ->
-                            val isSelected = (modelItem.equals(settings.modelName, ignoreCase = true)) ||
-                                (!agentModel.isNullOrBlank() && modelItem.equals(agentModel, ignoreCase = true))
+                            val currentActive = (agentModel?.takeIf { it.isNotBlank() } ?: settings.modelName).trim()
+                            val isSelected = modelItem.equals(currentActive, ignoreCase = true)
 
                             val slashIndex = modelItem.lastIndexOf('/')
                             val provider = if (slashIndex != -1) modelItem.substring(0, slashIndex) else null
@@ -906,14 +988,12 @@ fun ChatScreen(
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                         fontSize = 15.sp
                                     )
-                                    if (provider != null) {
-                                        Text(
-                                            text = provider,
-                                            color = TextTertiary,
-                                            fontSize = 12.sp,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                    }
+                                    Text(
+                                        text = if (provider != null) "$provider • ID: $modelItem" else "ID: $modelItem",
+                                        color = TextTertiary,
+                                        fontSize = 11.5.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
                                 }
 
                                 if (isSelected) {
@@ -949,6 +1029,7 @@ fun ChatTopBar(
     onNavigationDrawerOpen: () -> Unit,
     onStatusClick: () -> Unit,
     onRefreshClick: () -> Unit,
+    onProfileClick: () -> Unit,
     onModelClick: (() -> Unit)? = null,
     onSettingsClick: () -> Unit,
     onMenuClick: () -> Unit,
@@ -965,7 +1046,7 @@ fun ChatTopBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -990,63 +1071,112 @@ fun ChatTopBar(
                 }
 
                 Column(
-                    modifier = Modifier.clickable {
-                        if (onModelClick != null) {
-                            onModelClick()
-                        } else {
-                            onRefreshClick()
-                            onStatusClick()
-                        }
-                    }
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
+                    // Linha 1: Perfil / Agente (ex: Agent T, Tara) - Clica para mudar PERFIL
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onProfileClick() }
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
                     ) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = "Perfil",
+                            tint = GoldPrimary,
+                            modifier = Modifier.size(15.dp)
+                        )
                         Text(
-                            text = agentName ?: "Hermes Chat",
+                            text = agentName ?: "Agent T",
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,
                             color = TextPrimary
                         )
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = null,
+                            tint = TextTertiary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
 
-                        if (!agentModel.isNullOrBlank()) {
-                            val shortModel = agentModel.substringAfterLast('/')
+                    // Linha 2: Status do Servidor + Chip do Modelo LLM
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Status Termux
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { onStatusClick() }
+                                .padding(horizontal = 3.dp, vertical = 2.dp)
+                        ) {
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(GoldPrimary.copy(alpha = 0.15f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isOnline) StatusOnline else StatusOffline)
+                            )
+                            Text(
+                                text = if (isOnline) "Termux" else "Offline",
+                                fontSize = 11.sp,
+                                color = if (isOnline) StatusOnline else StatusOffline,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        // Separador
+                        Text(
+                            text = "•",
+                            color = TextTertiary,
+                            fontSize = 10.sp
+                        )
+
+                        // Chip do Modelo LLM (ex: Llama 3.1) - Clica para mudar MODELO LLM
+                        val displayModel = agentModel
+                            ?.takeIf { it.isNotBlank() && !it.equals("hermes-agent", ignoreCase = true) && !it.equals("hermes", ignoreCase = true) }
+                            ?.substringAfterLast('/')
+                            ?: "hermes-3-8b"
+
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = GoldPrimary.copy(alpha = 0.12f),
+                            border = BorderStroke(0.8.dp, GoldPrimary.copy(alpha = 0.4f)),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { onModelClick?.invoke() }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
+                                Icon(
+                                    imageVector = Icons.Default.SmartToy,
+                                    contentDescription = "Modelo LLM",
+                                    tint = GoldPrimary,
+                                    modifier = Modifier.size(11.dp)
+                                )
                                 Text(
-                                    text = shortModel,
+                                    text = displayModel,
                                     color = GoldPrimary,
-                                    fontSize = 10.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1
                                 )
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDropDown,
+                                    contentDescription = null,
+                                    tint = GoldPrimary.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(13.dp)
+                                )
                             }
                         }
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(if (isOnline) StatusOnline else StatusOffline)
-                        )
-
-                        Text(
-                            text = if (isOnline) "TERMUX LOCALHOST: 9120" else "TERMUX OFFLINE",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            letterSpacing = 0.8.sp,
-                            color = if (isOnline) StatusOnline else StatusOffline
-                        )
                     }
                 }
             }

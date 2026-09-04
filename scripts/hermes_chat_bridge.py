@@ -146,6 +146,76 @@ def list_all_profiles():
     return {"current": active_profile, "profiles": results}
 
 
+def list_all_models():
+    """Descobre os modelos configurados no Hermes e no gateway upstream."""
+    models_set = set()
+
+    # 1. Tentar ler modelos do gateway upstream (8642) se disponível
+    try:
+        req = urllib.request.Request(
+            f"http://{GATEWAY_HOST}:{GATEWAY_PORT}/v1/models",
+            headers={"User-Agent": "hermes-chat-bridge"}
+        )
+        if API_KEY:
+            req.add_header("Authorization", f"Bearer {API_KEY}")
+        with urllib.request.urlopen(req, timeout=3) as r:
+            if r.status == 200:
+                data = json.loads(r.read().decode("utf-8", "replace"))
+                items = data.get("data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                for it in items:
+                    mid = it.get("id") if isinstance(it, dict) else str(it)
+                    if mid and mid.lower() not in ("hermes-agent", "hermes"):
+                        models_set.add(mid)
+    except Exception:
+        pass
+
+    # 2. Ler config.yaml do hermes e dos perfis
+    configs = [os.path.join(HERMES_HOME, "config.yaml")]
+    profiles_dir = os.path.join(HERMES_HOME, "profiles")
+    if os.path.isdir(profiles_dir):
+        for d in os.listdir(profiles_dir):
+            cfg = os.path.join(profiles_dir, d, "config.yaml")
+            if os.path.isfile(cfg):
+                configs.append(cfg)
+
+    for cfg in configs:
+        try:
+            with open(cfg) as f:
+                txt = f.read()
+            for m in re.findall(r"model:\s*(\S+)", txt):
+                clean = m.strip().strip("'\"")
+                if clean and clean.lower() not in ("hermes-agent", "hermes"):
+                    models_set.add(clean)
+        except OSError:
+            pass
+
+    # 3. Modelos populares conhecidos para complementar a lista
+    default_catalog = [
+        "nousresearch/hermes-3-llama-3.1-8b",
+        "nousresearch/hermes-3-llama-3.1-70b",
+        "meta-llama/llama-3.3-70b-instruct",
+        "meta-llama/llama-3.1-8b-instruct",
+        "qwen/qwen-2.5-72b-instruct",
+        "qwen/qwen-2.5-coder-32b-instruct",
+        "deepseek/deepseek-chat",
+        "deepseek/deepseek-r1",
+        "mistralai/mistral-large-2407",
+        "openai/gpt-4o",
+        "openai/gpt-4o-mini",
+        "anthropic/claude-3-5-sonnet"
+    ]
+
+    result_list = list(models_set)
+    for dm in default_catalog:
+        if dm not in result_list:
+            result_list.append(dm)
+
+    return {
+        "object": "list",
+        "data": [{"id": m, "object": "model"} for m in result_list]
+    }
+
+
 def _send_json(handler, payload, status=200):
     data = json.dumps(payload, ensure_ascii=False).encode()
     handler.send_response(status)
@@ -228,6 +298,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.rstrip("/") in ("/profiles", "/api/profiles"):
             _send_json(self, list_all_profiles())
             return
+        if self.path.rstrip("/") in ("/models", "/v1/models", "/api/models"):
+            _send_json(self, list_all_models())
+            return
 
         # Rotas de telemetria do dashboard Hermes (proxy autenticado).
         # A app chama /dashboard/<rota>; expoem-se só as read-only úteis.
@@ -249,6 +322,26 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length else None
+        if self.path.rstrip("/") in ("/model/select", "/model"):
+            try:
+                data = json.loads((body or b"{}").decode())
+                model = data.get("model", "").strip()
+                if model:
+                    try:
+                        import subprocess
+                        subprocess.run(
+                            ["hermes", "model", model],
+                            check=True,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=5,
+                        )
+                    except Exception:
+                        pass
+                _send_json(self, {"success": True, "model": model})
+            except Exception as e:  # noqa: BLE001
+                _send_json(self, {"success": False, "error": str(e)}, status=400)
+            return
         if self.path.rstrip("/") == "/profile/select":
             try:
                 data = json.loads((body or b"{}").decode())

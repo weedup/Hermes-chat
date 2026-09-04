@@ -28,6 +28,7 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
@@ -293,7 +294,11 @@ class HermesApiClient {
         }
         messagesList.add(OpenAiMessage(role = "user", content = userPrompt))
 
-        val modelEffective = model.ifBlank { "hermes-agent" }
+        val modelEffective = if (model.isBlank() || model.equals("hermes-agent", ignoreCase = true) || model.equals("hermes", ignoreCase = true)) {
+            "nousresearch/hermes-3-llama-3.1-8b"
+        } else {
+            model
+        }
 
         val isStreaming = onStreamChunk != null
         val openAiPayload = OpenAiChatRequest(
@@ -618,25 +623,104 @@ class HermesApiClient {
         return@withContext null
     }
 
-    suspend fun fetchModels(baseUrl: String): List<String> = withContext(Dispatchers.IO) {
-        val normalized = normalizeUrl(baseUrl)
-        val endpoint = "${normalized.removeSuffix("/")}/v1/models"
+    suspend fun selectModel(baseUrl: String, modelName: String): Boolean = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl).removeSuffix("/")
         try {
-            val response: HttpResponse = client.get(endpoint) {
+            val response: HttpResponse = client.post("$normalized/model/select") {
+                contentType(ContentType.Application.Json)
+                setBody(buildJsonObject { put("model", modelName) }.toString())
                 timeout {
                     requestTimeoutMillis = 3_000
                     connectTimeoutMillis = 3_000
                 }
             }
-            if (response.status.isSuccess()) {
-                val parsed = jsonConfig.decodeFromString<ModelsListResponse>(response.bodyAsText())
-                val models = parsed.data.map { it.id }.filter { it.isNotBlank() }
-                if (models.isNotEmpty()) {
-                    return@withContext models
+            return@withContext response.status.isSuccess()
+        } catch (_: Exception) {
+            return@withContext false
+        }
+    }
+
+    suspend fun fetchModels(baseUrl: String): List<String> = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl).removeSuffix("/")
+        val endpoints = listOf("/models", "/v1/models", "/api/models")
+
+        for (path in endpoints) {
+            try {
+                val response: HttpResponse = client.get("$normalized$path") {
+                    timeout {
+                        requestTimeoutMillis = 3_000
+                        connectTimeoutMillis = 3_000
+                    }
                 }
-            }
-        } catch (_: Exception) {}
-        return@withContext listOf("hermes-agent", "hermes-3")
+                if (response.status.isSuccess()) {
+                    val body = response.bodyAsText()
+                    val elem = jsonConfig.parseToJsonElement(body)
+                    val result = mutableListOf<String>()
+
+                    if (elem is JsonObject) {
+                        // Formato OpenAI: { "data": [ { "id": "model_id" }, ... ] }
+                        val dataArr = elem["data"]?.jsonArray
+                        if (dataArr != null) {
+                            for (item in dataArr) {
+                                val id = when (item) {
+                                    is JsonObject -> item["id"]?.jsonPrimitive?.contentOrNull
+                                    is JsonPrimitive -> item.contentOrNull
+                                    else -> null
+                                }
+                                if (!id.isNullOrBlank()) result.add(id)
+                            }
+                        } else {
+                            // Formato alternativo { "models": [...] }
+                            val modelsArr = elem["models"]?.jsonArray
+                            if (modelsArr != null) {
+                                for (item in modelsArr) {
+                                    val id = when (item) {
+                                        is JsonObject -> item["name"]?.jsonPrimitive?.contentOrNull ?: item["id"]?.jsonPrimitive?.contentOrNull
+                                        is JsonPrimitive -> item.contentOrNull
+                                        else -> null
+                                    }
+                                    if (!id.isNullOrBlank()) result.add(id)
+                                }
+                            }
+                        }
+                    } else if (elem is JsonArray) {
+                        for (item in elem) {
+                            val id = when (item) {
+                                is JsonObject -> item["id"]?.jsonPrimitive?.contentOrNull ?: item["name"]?.jsonPrimitive?.contentOrNull
+                                is JsonPrimitive -> item.contentOrNull
+                                else -> null
+                            }
+                            if (!id.isNullOrBlank()) result.add(id)
+                        }
+                    }
+
+                    val sanitized = result
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() && !it.equals("hermes-agent", ignoreCase = true) && !it.equals("hermes", ignoreCase = true) }
+                        .distinct()
+
+                    if (sanitized.isNotEmpty()) {
+                        return@withContext sanitized
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // Catálogo padrão de modelos populares reais (caso o servidor ainda não tenha listagem dinâmica ativa)
+        return@withContext listOf(
+            "nousresearch/hermes-3-llama-3.1-8b",
+            "nousresearch/hermes-3-llama-3.1-70b",
+            "meta-llama/llama-3.3-70b-instruct",
+            "meta-llama/llama-3.1-8b-instruct",
+            "qwen/qwen-2.5-72b-instruct",
+            "qwen/qwen-2.5-coder-32b-instruct",
+            "deepseek/deepseek-chat",
+            "deepseek/deepseek-r1",
+            "mistralai/mistral-large-2407",
+            "openai/gpt-4o",
+            "openai/gpt-4o-mini",
+            "anthropic/claude-3-5-sonnet"
+        )
     }
 }
 

@@ -151,6 +151,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         checkServerHealth()
         refreshProfileInfo()
+        refreshModels()
         observeQueue()
     }
 
@@ -201,8 +202,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val prof = apiClient.fetchProfileInfo(settings.value.serverUrl)
                 if (prof != null) {
                     _agentName.value = prof.name
-                    if (!prof.model.isNullOrBlank()) {
-                        _agentModel.value = prof.model
+                    val pMod = prof.model.trim()
+                    if (pMod.isNotBlank() && !pMod.equals("hermes-agent", ignoreCase = true) && !pMod.equals("hermes", ignoreCase = true)) {
+                        _agentModel.value = pMod
                     }
                 }
                 val allProfs = apiClient.fetchAllProfiles(settings.value.serverUrl)
@@ -211,8 +213,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     val active = allProfs.firstOrNull { it.active }
                     if (active != null) {
                         _agentName.value = active.name
-                        if (!active.model.isNullOrBlank()) {
-                            _agentModel.value = active.model
+                        val aMod = active.model.trim()
+                        if (aMod.isNotBlank() && !aMod.equals("hermes-agent", ignoreCase = true) && !aMod.equals("hermes", ignoreCase = true)) {
+                            _agentModel.value = aMod
                         }
                     }
                 }
@@ -243,8 +246,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _isLoadingModels.value = true
             try {
                 val models = apiClient.fetchModels(settings.value.serverUrl)
-                if (models.isNotEmpty()) {
-                    _availableModels.value = models
+                val sanitized = models.filter { !it.equals("hermes-agent", ignoreCase = true) && !it.equals("hermes", ignoreCase = true) }
+                if (sanitized.isNotEmpty()) {
+                    _availableModels.value = sanitized
                 }
             } catch (_: Exception) {
             } finally {
@@ -255,10 +259,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectModel(modelName: String) {
         val trimmed = modelName.trim()
-        if (trimmed.isBlank()) return
+        if (trimmed.isBlank() || trimmed.equals("hermes-agent", ignoreCase = true) || trimmed.equals("hermes", ignoreCase = true)) return
         viewModelScope.launch {
             _agentModel.value = trimmed
             preferencesManager.updateModelName(trimmed)
+            // Notificar também a ponte no servidor se suportado
+            apiClient.selectModel(settings.value.serverUrl, trimmed)
             if (settings.value.hapticEnabled) {
                 hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
             }

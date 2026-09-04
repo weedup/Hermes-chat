@@ -27,7 +27,7 @@ class PreferencesManager(private val context: Context) {
 
         const val DEFAULT_SERVER_URL = "http://127.0.0.1:9120/"
         const val DEFAULT_CUSTOM_ENDPOINT = "AUTO"
-        const val DEFAULT_MODEL = "hermes-agent"
+        const val DEFAULT_MODEL = "nousresearch/hermes-3-llama-3.1-8b"
         const val DEFAULT_SYSTEM_PROMPT = "Tu és o Hermes, um modelo de inteligência artificial de elite a correr localmente no dispositivo via Termux. ANTES de cada resposta final, mostra o teu raciocínio passo a passo envolvido obrigatoriamente em <thinking>...</thinking>. O utilizador quer ver o teu pensamento em direto."
         const val DEFAULT_TEMPERATURE = 0.7f
         const val DEFAULT_MAX_TOKENS = 2048
@@ -35,10 +35,17 @@ class PreferencesManager(private val context: Context) {
     }
 
     val settingsFlow: Flow<HermesSettings> = context.dataStore.data.map { preferences ->
+        val savedModel = preferences[KEY_MODEL_NAME] ?: DEFAULT_MODEL
+        val effectiveModel = if (savedModel.isBlank() || savedModel.equals("hermes-agent", ignoreCase = true) || savedModel.equals("hermes", ignoreCase = true)) {
+            DEFAULT_MODEL
+        } else {
+            savedModel
+        }
+
         HermesSettings(
             serverUrl = preferences[KEY_SERVER_URL] ?: DEFAULT_SERVER_URL,
             customEndpoint = preferences[KEY_CUSTOM_ENDPOINT] ?: DEFAULT_CUSTOM_ENDPOINT,
-            modelName = preferences[KEY_MODEL_NAME] ?: DEFAULT_MODEL,
+            modelName = effectiveModel,
             systemPrompt = preferences[KEY_SYSTEM_PROMPT] ?: DEFAULT_SYSTEM_PROMPT,
             temperature = preferences[KEY_TEMPERATURE] ?: DEFAULT_TEMPERATURE,
             maxTokens = preferences[KEY_MAX_TOKENS] ?: DEFAULT_MAX_TOKENS,
