@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
@@ -75,6 +76,7 @@ val defaultQuickPrompts = listOf(
 // Comandos e Prompts na mesma lista deslizante homogénea
 val unifiedQuickItems = listOf(
     QuickPrompt(title = "/new", prompt = "/new", icon = Icons.Default.Add, isCommand = true),
+    QuickPrompt(title = "/model", prompt = "/model", icon = Icons.Default.SmartToy, isCommand = true),
     QuickPrompt(title = "/profile", prompt = "/profile", icon = Icons.Default.Person, isCommand = true),
     QuickPrompt(title = "/stop", prompt = "/stop", icon = Icons.Default.Stop, isCommand = true)
 ) + defaultQuickPrompts

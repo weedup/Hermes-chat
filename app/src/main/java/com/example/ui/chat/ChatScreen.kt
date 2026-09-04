@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -57,6 +58,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SyncProblem
@@ -71,6 +73,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
@@ -79,6 +82,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -162,6 +166,8 @@ fun ChatScreen(
     val agentName by viewModel.agentName.collectAsState()
     val agentModel by viewModel.agentModel.collectAsState()
     val availableProfiles by viewModel.availableProfiles.collectAsState()
+    val availableModels by viewModel.availableModels.collectAsState()
+    val isLoadingModels by viewModel.isLoadingModels.collectAsState()
     val pendingCount by viewModel.pendingCount.collectAsState()
 
     val listState = rememberLazyListState()
@@ -169,6 +175,7 @@ fun ChatScreen(
     // remember (não Saveable): o estado do dialog não deve sobreviver a navegação
     // para Settings e voltar — era isso que reabria a janela ao andar para trás.
     var showProfileDialog by remember { mutableStateOf(false) }
+    var showModelSheet by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
 
     // Abre o dialog de perfis quando o ViewModel pede (chip /profile ou comando escrito)
@@ -179,6 +186,16 @@ fun ChatScreen(
             showProfileDialog = true
             // Consome o evento para não reabrir ao voltar das Settings
             viewModel.consumeProfileDialogEvent()
+        }
+    }
+
+    // Abre o menu/sheet de modelos quando o ViewModel pede (chip /model ou comando /model)
+    val modelDialogEvent by viewModel.modelDialogEvent.collectAsState()
+    LaunchedEffect(modelDialogEvent) {
+        if (modelDialogEvent > 0) {
+            viewModel.refreshModels()
+            showModelSheet = true
+            viewModel.consumeModelDialogEvent()
         }
     }
 
@@ -336,6 +353,7 @@ fun ChatScreen(
                 // Header Bar
                 ChatTopBar(
                     agentName = agentName,
+                    agentModel = agentModel ?: settings.modelName,
                     serverHealth = serverHealth,
                     onNavigationDrawerOpen = {
                         scope.launch { drawerState.open() }
@@ -344,6 +362,11 @@ fun ChatScreen(
                     onRefreshClick = {
                         viewModel.hapticHelper.trigger(HapticHelper.HapticType.LIGHT_TICK, settings.hapticEnabled)
                         viewModel.checkServerHealth()
+                    },
+                    onModelClick = {
+                        viewModel.hapticHelper.trigger(HapticHelper.HapticType.CLICK, settings.hapticEnabled)
+                        viewModel.refreshModels()
+                        showModelSheet = true
                     },
                     onSettingsClick = {
                         viewModel.hapticHelper.trigger(HapticHelper.HapticType.CLICK, settings.hapticEnabled)
@@ -367,6 +390,16 @@ fun ChatScreen(
                                 viewModel.createNewSession()
                             }
                         )
+                        if (!isGenerating && messages.any { it.sender == MessageSender.HERMES && it.status == MessageStatus.SENT }) {
+                            DropdownMenuItem(
+                                text = { Text("Regenerar Resposta", color = TextPrimary) },
+                                leadingIcon = { Icon(Icons.Default.Refresh, null, tint = GoldAccent) },
+                                onClick = {
+                                    showMenu = false
+                                    viewModel.regenerateLastMessage()
+                                }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Verificar Ligação Termux", color = TextPrimary) },
                             leadingIcon = { Icon(Icons.Default.Refresh, null, tint = GoldAccent) },
@@ -381,6 +414,15 @@ fun ChatScreen(
                             onClick = {
                                 showMenu = false
                                 onOpenDiagnostics()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Escolher Modelo", color = TextPrimary) },
+                            leadingIcon = { Icon(Icons.Default.SmartToy, null, tint = GoldAccent) },
+                            onClick = {
+                                showMenu = false
+                                viewModel.refreshModels()
+                                showModelSheet = true
                             }
                         )
                         DropdownMenuItem(
@@ -450,15 +492,59 @@ fun ChatScreen(
                                 MessageBubble(
                                     message = message,
                                     agentModel = agentModel,
+                                    isGenerating = isGenerating,
                                     availableProfiles = availableProfiles,
                                     onSelectProfile = { profId, profName ->
                                         viewModel.switchProfile(profId, profName)
                                     },
                                     hapticHelper = viewModel.hapticHelper,
                                     hapticEnabled = settings.hapticEnabled,
+                                    onRegenerate = { viewModel.regenerateMessage(message.id) },
                                     onRetry = { viewModel.retryMessage(message.id) },
                                     onDelete = { viewModel.deleteMessage(message.id) },
                                     onOpenSettings = onNavigateToSettings
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Botão de Regenerar Resposta Rápida (quando a última mensagem do chat for do modelo)
+                val lastMsg = messages.lastOrNull()
+                if (!isGenerating && lastMsg != null && lastMsg.sender == MessageSender.HERMES && lastMsg.status == MessageStatus.SENT) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = NavySurfaceCard.copy(alpha = 0.95f),
+                            border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.45f)),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable {
+                                    viewModel.hapticHelper.trigger(HapticHelper.HapticType.CLICK, settings.hapticEnabled)
+                                    viewModel.regenerateMessage(lastMsg.id)
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Regenerar resposta",
+                                    tint = GoldPrimary,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "Regenerar resposta",
+                                    color = GoldPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
                         }
@@ -609,15 +695,261 @@ fun ChatScreen(
             shape = RoundedCornerShape(20.dp)
         )
     }
+
+    if (showModelSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+        var searchQuery by remember { mutableStateOf("") }
+        val modelsList = remember(availableModels, settings.modelName, agentModel) {
+            val set = linkedSetOf<String>()
+            if (!settings.modelName.isNullOrBlank()) set.add(settings.modelName.trim())
+            if (!agentModel.isNullOrBlank()) set.add(agentModel!!.trim())
+            set.addAll(availableModels)
+            if (set.isEmpty()) {
+                listOf(
+                    "nousresearch/hermes-3-llama-3.1-8b",
+                    "meta-llama/llama-3.1-8b-instruct",
+                    "meta-llama/llama-3.3-70b-instruct",
+                    "qwen/qwen-2.5-72b-instruct",
+                    "mistralai/mistral-large-2407"
+                )
+            } else {
+                set.toList()
+            }
+        }
+
+        val filteredModels = remember(modelsList, searchQuery) {
+            if (searchQuery.isBlank()) {
+                modelsList
+            } else {
+                modelsList.filter { it.contains(searchQuery.trim(), ignoreCase = true) }
+            }
+        }
+
+        ModalBottomSheet(
+            onDismissRequest = { showModelSheet = false },
+            sheetState = sheetState,
+            containerColor = NavyDeep,
+            dragHandle = {
+                Box(
+                    modifier = Modifier
+                        .padding(vertical = 12.dp)
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(GoldPrimary.copy(alpha = 0.5f))
+                )
+            },
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.85f)
+                    .padding(horizontal = 20.dp)
+                    .navigationBarsPadding()
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(GoldContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SmartToy,
+                                contentDescription = null,
+                                tint = GoldPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "Escolher Modelo",
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
+                            )
+                            Text(
+                                text = "${modelsList.size} modelo(s) disponível(eis)",
+                                color = TextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = { viewModel.refreshModels() },
+                        enabled = !isLoadingModels
+                    ) {
+                        if (isLoadingModels) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = GoldPrimary,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Atualizar modelos",
+                                tint = GoldAccent
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Campo de pesquisa
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Pesquisar modelo...", color = TextTertiary, fontSize = 14.sp) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Pesquisar",
+                            tint = GoldAccent,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Limpar pesquisa",
+                                    tint = TextTertiary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        cursorColor = GoldPrimary,
+                        focusedBorderColor = GoldPrimary,
+                        unfocusedBorderColor = NavyBorder,
+                        focusedContainerColor = NavySurfaceVariant,
+                        unfocusedContainerColor = NavySurfaceVariant
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Lista de modelos
+                if (filteredModels.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (searchQuery.isBlank()) "Nenhum modelo encontrado" else "Nenhum modelo corresponde a '$searchQuery'",
+                            color = TextTertiary,
+                            fontSize = 14.sp
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(bottom = 24.dp)
+                    ) {
+                        items(filteredModels, key = { it }) { modelItem ->
+                            val isSelected = (modelItem.equals(settings.modelName, ignoreCase = true)) ||
+                                (!agentModel.isNullOrBlank() && modelItem.equals(agentModel, ignoreCase = true))
+
+                            val slashIndex = modelItem.lastIndexOf('/')
+                            val provider = if (slashIndex != -1) modelItem.substring(0, slashIndex) else null
+                            val modelSimpleName = if (slashIndex != -1) modelItem.substring(slashIndex + 1) else modelItem
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(if (isSelected) GoldPrimary.copy(alpha = 0.15f) else NavySurfaceVariant)
+                                    .border(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) GoldPrimary else NavyBorder,
+                                        shape = RoundedCornerShape(14.dp)
+                                    )
+                                    .clickable {
+                                        viewModel.hapticHelper.trigger(HapticHelper.HapticType.CLICK, settings.hapticEnabled)
+                                        viewModel.selectModel(modelItem)
+                                        showModelSheet = false
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 13.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = modelSimpleName,
+                                        color = if (isSelected) GoldPrimary else TextPrimary,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 15.sp
+                                    )
+                                    if (provider != null) {
+                                        Text(
+                                            text = provider,
+                                            color = TextTertiary,
+                                            fontSize = 12.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(26.dp)
+                                            .clip(CircleShape)
+                                            .background(GoldPrimary),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selecionado",
+                                            tint = NavyDeep,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
 fun ChatTopBar(
     agentName: String?,
+    agentModel: String? = null,
     serverHealth: com.example.data.ServerHealth?,
     onNavigationDrawerOpen: () -> Unit,
     onStatusClick: () -> Unit,
     onRefreshClick: () -> Unit,
+    onModelClick: (() -> Unit)? = null,
     onSettingsClick: () -> Unit,
     onMenuClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -639,7 +971,8 @@ fun ChatTopBar(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f, fill = false)
             ) {
                 IconButton(
                     onClick = onNavigationDrawerOpen,
@@ -658,16 +991,43 @@ fun ChatTopBar(
 
                 Column(
                     modifier = Modifier.clickable {
-                        onRefreshClick()
-                        onStatusClick()
+                        if (onModelClick != null) {
+                            onModelClick()
+                        } else {
+                            onRefreshClick()
+                            onStatusClick()
+                        }
                     }
                 ) {
-                    Text(
-                        text = agentName ?: "Hermes Chat",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = TextPrimary
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = agentName ?: "Hermes Chat",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = TextPrimary
+                        )
+
+                        if (!agentModel.isNullOrBlank()) {
+                            val shortModel = agentModel.substringAfterLast('/')
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(GoldPrimary.copy(alpha = 0.15f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = shortModel,
+                                    color = GoldPrimary,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -770,10 +1130,12 @@ fun formatModelDisplayName(messageModel: String?, agentModel: String?): String {
 fun MessageBubble(
     message: ChatMessage,
     agentModel: String?,
+    isGenerating: Boolean = false,
     availableProfiles: List<ProfileDto>,
     onSelectProfile: (String, String) -> Unit,
     hapticHelper: HapticHelper,
     hapticEnabled: Boolean,
+    onRegenerate: () -> Unit = {},
     onRetry: () -> Unit,
     onDelete: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -1004,6 +1366,33 @@ fun MessageBubble(
                         color = GoldAccent.copy(alpha = 0.8f),
                         fontSize = 10.5.sp
                     )
+                }
+
+                if (!isUser) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable(enabled = !isGenerating) {
+                                hapticHelper.trigger(HapticHelper.HapticType.LIGHT_TICK, hapticEnabled)
+                                onRegenerate()
+                            }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Regenerar Mensagem",
+                            tint = if (!isGenerating) GoldAccent.copy(alpha = 0.85f) else TextTertiary.copy(alpha = 0.4f),
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "Regenerar",
+                            color = if (!isGenerating) GoldAccent.copy(alpha = 0.85f) else TextTertiary.copy(alpha = 0.4f),
+                            fontSize = 10.5.sp
+                        )
+                    }
                 }
             }
         }

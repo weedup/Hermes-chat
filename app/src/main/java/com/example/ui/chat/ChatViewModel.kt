@@ -112,6 +112,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _availableProfiles = MutableStateFlow<List<ProfileDto>>(emptyList())
     val availableProfiles: StateFlow<List<ProfileDto>> = _availableProfiles.asStateFlow()
 
+    private val _availableModels = MutableStateFlow<List<String>>(emptyList())
+    val availableModels: StateFlow<List<String>> = _availableModels.asStateFlow()
+
+    private val _isLoadingModels = MutableStateFlow(false)
+    val isLoadingModels: StateFlow<Boolean> = _isLoadingModels.asStateFlow()
+
     private val _pendingQueue = MutableStateFlow<List<String>>(emptyList())
     private val _pendingCount = MutableStateFlow(0)
     val pendingCount: StateFlow<Int> = _pendingCount.asStateFlow()
@@ -122,6 +128,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun consumeProfileDialogEvent() {
         _profileDialogEvent.value = 0
+    }
+
+    // Incrementa sempre que um comando /model pede o menu/bottom-sheet de seleção de modelos
+    private val _modelDialogEvent = MutableStateFlow(0)
+    val modelDialogEvent: StateFlow<Int> = _modelDialogEvent.asStateFlow()
+
+    fun consumeModelDialogEvent() {
+        _modelDialogEvent.value = 0
+    }
+
+    fun openModelSelector() {
+        _modelDialogEvent.value += 1
+        refreshModels()
     }
 
     private var generateJob: Job? = null
@@ -218,6 +237,34 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun refreshModels() {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (_isLoadingModels.value) return@launch
+            _isLoadingModels.value = true
+            try {
+                val models = apiClient.fetchModels(settings.value.serverUrl)
+                if (models.isNotEmpty()) {
+                    _availableModels.value = models
+                }
+            } catch (_: Exception) {
+            } finally {
+                _isLoadingModels.value = false
+            }
+        }
+    }
+
+    fun selectModel(modelName: String) {
+        val trimmed = modelName.trim()
+        if (trimmed.isBlank()) return
+        viewModelScope.launch {
+            _agentModel.value = trimmed
+            preferencesManager.updateModelName(trimmed)
+            if (settings.value.hapticEnabled) {
+                hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
+            }
+        }
+    }
+
     fun checkServerHealth() {
         viewModelScope.launch {
             val currentUrl = settings.value.serverUrl
@@ -285,6 +332,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
             cmd == "/profile" -> {
                 _profileDialogEvent.value += 1
+                true
+            }
+            cmd == "/model" || cmd == "/models" -> {
+                openModelSelector()
+                true
+            }
+            cmd.startsWith("/model ") -> {
+                val chosenModel = text.trim().substringAfter("/model ").trim()
+                if (chosenModel.isNotBlank()) {
+                    selectModel(chosenModel)
+                } else {
+                    openModelSelector()
+                }
                 true
             }
             else -> false
@@ -384,146 +444,206 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 repository.updateSessionTitle(currentSId, titlePreview)
             }
 
-            _isGenerating.value = true
-            generateJob = coroutineContext[Job]
+            // Histórico antes da nova mensagem do utilizador
+            val history = messages.value.filter { it.status == MessageStatus.SENT && it.id != userMsgId }
 
-            val currentSettings = settings.value
-            val history = messages.value.filter { it.status == MessageStatus.SENT }
+            executeModelGeneration(pendingHermesMsg, history, textToSend)
+        }
+    }
 
-            // Streaming callback: atualiza texto e raciocínio em tempo real no Room e StateFlow
-            var accumulatedText = ""
-            var currentReasoning = ""
+    private suspend fun executeModelGeneration(
+        pendingHermesMsg: ChatMessage,
+        history: List<ChatMessage>,
+        promptText: String
+    ) {
+        _isGenerating.value = true
+        generateJob = kotlin.coroutines.coroutineContext[Job]
+
+        val currentSettings = settings.value
+
+        // Streaming callback: atualiza texto e raciocínio em tempo real no Room e StateFlow
+        var accumulatedText = ""
+        var currentReasoning = ""
+        _liveThinking.value = null
+        _liveToolUse.value = null
+        _finalThinking.value = null
+
+        apiClient.onStreamChunk = { chunk ->
+            accumulatedText += chunk
+            val currentChunkText = accumulatedText
+            val reasoningSnapshot = currentReasoning
+            viewModelScope.launch {
+                val updated = pendingHermesMsg.copy(
+                    text = currentChunkText,
+                    status = MessageStatus.STREAMING,
+                    reasoning = reasoningSnapshot.takeIf { it.isNotBlank() }
+                )
+                repository.updateMessage(updated)
+            }
+        }
+
+        apiClient.onReasoningChunk = { reasoningText ->
+            currentReasoning = reasoningText
+            _liveThinking.value = reasoningText
+            val textSnapshot = accumulatedText
+            viewModelScope.launch {
+                val updated = pendingHermesMsg.copy(
+                    text = textSnapshot,
+                    status = MessageStatus.STREAMING,
+                    reasoning = reasoningText.takeIf { it.isNotBlank() }
+                )
+                repository.updateMessage(updated)
+            }
+        }
+
+        apiClient.onToolUse = { toolsText ->
+            viewModelScope.launch { _liveToolUse.value = toolsText }
+        }
+
+        val modelToUse = _agentModel.value?.takeIf { it.isNotBlank() } ?: currentSettings.modelName
+
+        val result = apiClient.sendMessage(
+            baseUrl = currentSettings.serverUrl,
+            history = history,
+            userPrompt = promptText,
+            model = modelToUse,
+            systemPrompt = currentSettings.systemPrompt,
+            temperature = currentSettings.temperature,
+            maxTokens = currentSettings.maxTokens,
+            customEndpoint = currentSettings.customEndpoint
+        )
+
+        _isGenerating.value = false
+
+        if (result.isSuccess) {
+            val sendResult = result.getOrThrow()
+            val reply = sendResult.reply
+            val latency = sendResult.latencyMs
+            val reasoning = sendResult.reasoning
+            val returnedModel = sendResult.modelName
+
             _liveThinking.value = null
             _liveToolUse.value = null
             _finalThinking.value = null
 
-            apiClient.onStreamChunk = { chunk ->
-                accumulatedText += chunk
-                val currentChunkText = accumulatedText
-                val reasoningSnapshot = currentReasoning
-                viewModelScope.launch {
-                    val updated = pendingHermesMsg.copy(
-                        text = currentChunkText,
-                        status = MessageStatus.STREAMING,
-                        reasoning = reasoningSnapshot.takeIf { it.isNotBlank() }
-                    )
-                    repository.updateMessage(updated)
-                }
+            val rawText = if (accumulatedText.isNotBlank()) accumulatedText else reply
+            val extraction = com.example.ui.components.extractThoughtAndResponse(rawText)
+            val cleanText = extraction.cleanResponse
+            val finalReasoning = reasoning?.takeIf { it.isNotBlank() }
+                ?: extraction.thought?.takeIf { it.isNotBlank() }
+                ?: currentReasoning.takeIf { it.isNotBlank() }
+
+            val finalModel = returnedModel?.takeIf { it.isNotBlank() }
+                ?: pendingHermesMsg.modelName.takeIf { it.isNotBlank() && it != "hermes-agent" }
+                ?: _agentModel.value?.takeIf { it.isNotBlank() }
+                ?: currentSettings.modelName
+
+            if (!returnedModel.isNullOrBlank()) {
+                _agentModel.value = returnedModel
             }
 
-            apiClient.onReasoningChunk = { reasoningText ->
-                currentReasoning = reasoningText
-                _liveThinking.value = reasoningText
-                val textSnapshot = accumulatedText
-                viewModelScope.launch {
-                    val updated = pendingHermesMsg.copy(
-                        text = textSnapshot,
-                        status = MessageStatus.STREAMING,
-                        reasoning = reasoningText.takeIf { it.isNotBlank() }
-                    )
-                    repository.updateMessage(updated)
-                }
-            }
-
-            apiClient.onToolUse = { toolsText ->
-                viewModelScope.launch { _liveToolUse.value = toolsText }
-            }
-
-            val modelToUse = _agentModel.value?.takeIf { it.isNotBlank() } ?: currentSettings.modelName
-
-            val result = apiClient.sendMessage(
-                baseUrl = currentSettings.serverUrl,
-                history = history,
-                userPrompt = textToSend,
-                model = modelToUse,
-                systemPrompt = currentSettings.systemPrompt,
-                temperature = currentSettings.temperature,
-                maxTokens = currentSettings.maxTokens,
-                customEndpoint = currentSettings.customEndpoint
+            val completedMsg = pendingHermesMsg.copy(
+                text = cleanText,
+                status = MessageStatus.SENT,
+                latencyMs = latency,
+                reasoning = finalReasoning,
+                modelName = finalModel
             )
+            repository.updateMessage(completedMsg)
 
-            _isGenerating.value = false
+            // Disponibilizar pensamento final após a resposta
+            if (!finalReasoning.isNullOrBlank()) {
+                _finalThinking.value = finalReasoning
+            }
 
-            if (result.isSuccess) {
-                val sendResult = result.getOrThrow()
-                val reply = sendResult.reply
-                val latency = sendResult.latencyMs
-                val reasoning = sendResult.reasoning
-                val returnedModel = sendResult.modelName
-
-                _liveThinking.value = null
-                _liveToolUse.value = null
-                _finalThinking.value = null
-
-                val rawText = if (accumulatedText.isNotBlank()) accumulatedText else reply
-                val extraction = com.example.ui.components.extractThoughtAndResponse(rawText)
-                val cleanText = extraction.cleanResponse
-                val finalReasoning = reasoning?.takeIf { it.isNotBlank() }
-                    ?: extraction.thought?.takeIf { it.isNotBlank() }
-                    ?: currentReasoning.takeIf { it.isNotBlank() }
-
-                val finalModel = returnedModel?.takeIf { it.isNotBlank() }
-                    ?: pendingHermesMsg.modelName.takeIf { it.isNotBlank() && it != "hermes-agent" }
-                    ?: _agentModel.value?.takeIf { it.isNotBlank() }
-                    ?: currentSettings.modelName
-
-                if (!returnedModel.isNullOrBlank()) {
-                    _agentModel.value = returnedModel
-                }
-
-                val completedMsg = pendingHermesMsg.copy(
-                    text = cleanText,
-                    status = MessageStatus.SENT,
-                    latencyMs = latency,
-                    reasoning = finalReasoning,
-                    modelName = finalModel
-                )
-                repository.updateMessage(completedMsg)
-
-                // Disponibilizar pensamento final após a resposta
-                if (!finalReasoning.isNullOrBlank()) {
-                    _finalThinking.value = finalReasoning
-                }
-
-                if (currentSettings.hapticEnabled) {
-                    hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
-                }
-                _serverHealth.value = ServerHealth(
-                    isReachable = true,
-                    statusCode = 200,
-                    latencyMs = latency,
-                    serverHeader = "Hermes-Server"
-                )
-            } else {
-                _liveThinking.value = null
-                _liveToolUse.value = null
-                _finalThinking.value = null
-                val error = result.exceptionOrNull()
-                val errorMsg = pendingHermesMsg.copy(
-                    text = if (accumulatedText.isNotBlank()) accumulatedText else "Erro na resposta do Hermes: ${error?.message ?: "Falha de ligação"}",
-                    status = MessageStatus.ERROR,
-                    errorDetails = error?.localizedMessage
-                )
-                repository.updateMessage(errorMsg)
-                if (currentSettings.hapticEnabled) {
-                    hapticHelper.trigger(HapticHelper.HapticType.ERROR)
-                }
+            if (currentSettings.hapticEnabled) {
+                hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
+            }
+            _serverHealth.value = ServerHealth(
+                isReachable = true,
+                statusCode = 200,
+                latencyMs = latency,
+                serverHeader = "Hermes-Server"
+            )
+        } else {
+            _liveThinking.value = null
+            _liveToolUse.value = null
+            _finalThinking.value = null
+            val error = result.exceptionOrNull()
+            val errorMsg = pendingHermesMsg.copy(
+                text = if (accumulatedText.isNotBlank()) accumulatedText else "Erro na resposta do Hermes: ${error?.message ?: "Falha de ligação"}",
+                status = MessageStatus.ERROR,
+                errorDetails = error?.localizedMessage
+            )
+            repository.updateMessage(errorMsg)
+            if (currentSettings.hapticEnabled) {
+                hapticHelper.trigger(HapticHelper.HapticType.ERROR)
             }
         }
     }
 
-    fun retryMessage(messageId: String) {
+    /**
+     * Regenera a resposta do modelo a partir do prompt do utilizador que lhe deu origem.
+     * Limpa a mensagem do modelo no ecrã, reposiciona para SENDING e solicita uma nova geração.
+     */
+    fun regenerateMessage(messageId: String) {
+        if (_isGenerating.value) return
+
         val currentMsgs = messages.value
-        val errorMsgIndex = currentMsgs.indexOfFirst { it.id == messageId }
-        if (errorMsgIndex > 0) {
-            val userMsg = currentMsgs[errorMsgIndex - 1]
-            if (userMsg.sender == MessageSender.USER) {
-                viewModelScope.launch {
-                    repository.deleteMessage(messageId)
-                    doSend(userMsg.text)
-                }
+        val targetIndex = currentMsgs.indexOfFirst { it.id == messageId }
+        if (targetIndex < 0) return
+        val targetMsg = currentMsgs[targetIndex]
+        if (targetMsg.sender != MessageSender.HERMES) return
+
+        // Localizar a mensagem do utilizador que deu origem a esta resposta
+        val priorUserMsg = currentMsgs.take(targetIndex).lastOrNull { it.sender == MessageSender.USER } ?: return
+        val userMsgIndex = currentMsgs.indexOf(priorUserMsg)
+
+        // Histórico de mensagens anteriores a este turno
+        val priorHistory = currentMsgs.take(userMsgIndex).filter { it.status == MessageStatus.SENT }
+
+        viewModelScope.launch {
+            if (settings.value.hapticEnabled) {
+                hapticHelper.trigger(HapticHelper.HapticType.CLICK)
             }
+
+            // Se existirem mensagens posteriores na conversa, apagar para manter a coerência temporal
+            for (i in (targetIndex + 1) until currentMsgs.size) {
+                repository.deleteMessage(currentMsgs[i].id)
+            }
+
+            val initialModel = _agentModel.value?.takeIf { it.isNotBlank() }
+                ?: settings.value.modelName.takeIf { it.isNotBlank() && it != "hermes-agent" }
+                ?: settings.value.modelName
+
+            val pendingHermesMsg = targetMsg.copy(
+                text = "",
+                status = MessageStatus.SENDING,
+                reasoning = null,
+                latencyMs = 0,
+                errorDetails = null,
+                modelName = initialModel,
+                timestamp = System.currentTimeMillis()
+            )
+            repository.updateMessage(pendingHermesMsg)
+
+            executeModelGeneration(pendingHermesMsg, priorHistory, priorUserMsg.text)
         }
+    }
+
+    /**
+     * Regenera a última mensagem do modelo na sessão atual.
+     */
+    fun regenerateLastMessage() {
+        if (_isGenerating.value) return
+        val lastHermes = messages.value.lastOrNull { it.sender == MessageSender.HERMES }
+        if (lastHermes != null) {
+            regenerateMessage(lastHermes.id)
+        }
+    }
+
+    fun retryMessage(messageId: String) {
+        regenerateMessage(messageId)
     }
 
     fun deleteMessage(messageId: String) {
