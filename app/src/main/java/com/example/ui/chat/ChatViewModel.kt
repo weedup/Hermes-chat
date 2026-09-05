@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -37,6 +38,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val apiClient = HermesApiClient()
     val hapticHelper = HapticHelper(application)
 
+    // ---- Sessões por perfil: cada perfil tem os seus próprios chats ----
+    // O ID lógico é "<profile>__<uuid>" mas a Room guarda o id como está (sem migração).
+
+    /** Perfil ativo na app (id canónico do Hermes: "default", "tara", ...). */
+    private val _activeProfileId = MutableStateFlow("default")
+    val activeProfileId: StateFlow<String> = _activeProfileId.asStateFlow()
+
     val settings: StateFlow<HermesSettings> = preferencesManager.settingsFlow
         .stateIn(
             scope = viewModelScope,
@@ -44,15 +52,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = HermesSettings()
         )
 
-    val sessions: StateFlow<List<ChatSession>> = repository.sessions
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    /** Sessões visíveis: apenas as do perfil ativo.
+     *  - perfil "default": ids simples ("default", "<uuid>") — compatível com chats antigos
+     *  - outros perfis: ids prefixados "<profile>__<base>" */
+    val sessions: StateFlow<List<ChatSession>> = combine(repository.sessions, _activeProfileId) { all, profId ->
+        all.filter { msgSessionBelongsTo(it.id, profId) }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 
     private val _currentSessionId = MutableStateFlow("default")
     val currentSessionId: StateFlow<String> = _currentSessionId.asStateFlow()
+
+    private fun msgSessionBelongsTo(sessionId: String, profileId: String): Boolean =
+        if (profileId == "default") !sessionId.contains("__")
+        else sessionId.startsWith("$profileId__")
+
+    private fun sessionIdFor(profileId: String, base: String): String =
+        if (profileId == "default") base else "$profileId__$base"
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val messages: StateFlow<List<ChatMessage>> = _currentSessionId
@@ -147,10 +166,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
-            repository.ensureSessionExists("default", "Chat Principal")
             // Resgata mensagens órfãs (SENDING/STREAMING) de sessões passadas:
             // passam a ERROR em vez de ficarem com o spinner preso para sempre.
             repository.rescueStuckMessages()
+        }
+        // Garante que a sessão base do perfil ativo existe (e acompanha trocas de perfil)
+        viewModelScope.launch {
+            _activeProfileId.collect { profId ->
+                repository.ensureSessionExists(sessionIdFor(profId, "default"), "Chat Principal")
+            }
         }
         checkServerHealth()
         refreshProfileInfo()
@@ -170,33 +194,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         _availableProfiles.value = allProfs
                         val active = allProfs.firstOrNull { it.active }
                         if (active != null) {
-                            if (!active.name.equals(_agentName.value, ignoreCase = true)) {
-                                _agentName.value = active.name
-                            }
-                            val aMod = active.model.trim()
-                            if (aMod.isNotBlank() && !aMod.equals("hermes-agent", ignoreCase = true) && !aMod.equals("hermes", ignoreCase = true)) {
-                                val old = _agentModel.value
-                                if (!aMod.equals(old, ignoreCase = true)) {
-                                    _agentModel.value = aMod
-                                    preferencesManager.updateModelName(aMod)
-                                }
-                            }
+                            // Perfil E modelo: se o dashboard trocou, a app acompanha (muda de chat tb)
+                            setActiveProfileInternal(active.id, active.name, active.model)
                         }
                     }
                     val prof = apiClient.fetchProfileInfo(settings.value.serverUrl)
                     if (prof != null) {
-                        val pName = prof.name.trim()
-                        if (pName.isNotBlank() && !pName.equals(_agentName.value, ignoreCase = true)) {
-                            _agentName.value = pName
-                        }
-                        val pMod = prof.model.trim()
-                        if (pMod.isNotBlank() && !pMod.equals("hermes-agent", ignoreCase = true) && !pMod.equals("hermes", ignoreCase = true)) {
-                            val old = _agentModel.value
-                            if (!pMod.equals(old, ignoreCase = true)) {
-                                _agentModel.value = pMod
-                                preferencesManager.updateModelName(pMod)
-                            }
-                        }
+                        setActiveProfileInternal(prof.id, prof.name, prof.model)
                     }
                 } catch (_: Exception) {
                     // Silencioso — se a bridge estiver temporariamente desligada
@@ -242,7 +246,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun createNewSession() {
         viewModelScope.launch {
-            val newId = UUID.randomUUID().toString()
+            val newId = sessionIdFor(_activeProfileId.value, UUID.randomUUID().toString())
             repository.ensureSessionExists(newId, "Novo Chat")
             _currentSessionId.value = newId
         }
@@ -256,8 +260,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 if (remaining.isNotEmpty()) {
                     _currentSessionId.value = remaining.first().id
                 } else {
-                    repository.ensureSessionExists("default", "Chat Principal")
-                    _currentSessionId.value = "default"
+                    repository.ensureSessionExists(sessionIdFor(_activeProfileId.value, "default"), "Chat Principal")
+                    _currentSessionId.value = sessionIdFor(_activeProfileId.value, "default")
                 }
             }
         }
@@ -272,25 +276,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     _availableProfiles.value = allProfs
                     val active = allProfs.firstOrNull { it.active }
                     if (active != null) {
-                        _agentName.value = active.name
-                        val aMod = active.model.trim()
-                        if (aMod.isNotBlank() && !aMod.equals("hermes-agent", ignoreCase = true) && !aMod.equals("hermes", ignoreCase = true)) {
-                            _agentModel.value = aMod
-                            preferencesManager.updateModelName(aMod)
-                        }
+                        setActiveProfileInternal(active.id, active.name, active.model)
                     }
                 }
                 // 2. Confirmação do perfil e modelo ativo via /profile
                 val prof = apiClient.fetchProfileInfo(settings.value.serverUrl)
                 if (prof != null) {
-                    _agentName.value = prof.name
-                    val pMod = prof.model.trim()
-                    if (pMod.isNotBlank() && !pMod.equals("hermes-agent", ignoreCase = true) && !pMod.equals("hermes", ignoreCase = true)) {
-                        _agentModel.value = pMod
-                        preferencesManager.updateModelName(pMod)
-                    }
+                    setActiveProfileInternal(prof.id, prof.name, prof.model)
                 }
             } catch (_: Exception) {}
+        }
+    }
+
+    /** Aplica o perfil ativo vindo do servidor e entra na sessão desse perfil (sem apagar nada).
+     *  Não mexe no DataStore nem no bridge — apenas reflete o estado real do servidor. */
+    private fun setActiveProfileInternal(profileId: String, name: String?, model: String?) {
+        val profId = profileId.ifBlank { "default" }
+        if (_activeProfileId.value != profId) {
+            _activeProfileId.value = profId
+            _agentName.value = name ?: profId
+            _currentSessionId.value = sessionIdFor(profId, "default")
+        }
+        _agentName.value = name ?: profId
+        val m = model?.trim().orEmpty()
+        if (m.isNotBlank() && !m.equals("hermes-agent", ignoreCase = true) && !m.equals("hermes", ignoreCase = true)) {
+            _agentModel.value = m
         }
     }
 
@@ -304,17 +314,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             val ok = apiClient.switchProfile(settings.value.serverUrl, profileId)
             if (ok) {
-                _agentName.value = displayName
-                if (targetModel != null) {
-                    _agentModel.value = targetModel
-                    preferencesManager.updateModelName(targetModel)
+                // 1. Troca o perfil ativo NA APP → muda para os chats DELE (histórico preservado)
+                setActiveProfileInternal(profileId, displayName, targetModel)
+                // 2. O modelo passa a ser o do perfil alvo — no bridge, no config.yaml e na app
+                val modelToApply = targetModel ?: _agentModel.value
+                if (!modelToApply.isNullOrBlank()) {
+                    preferencesManager.updateModelName(modelToApply)
+                    apiClient.selectModel(settings.value.serverUrl, modelToApply)
                 }
-                // Sincroniza imediatamente com o servidor para confirmar estado
+                // 3. Sincroniza imediatamente com o servidor para confirmar estado
                 refreshProfileInfo()
                 if (settings.value.hapticEnabled) {
                     hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
                 }
-                // NOTA: O histórico de chat da sessão é intencionalmente preservado (não é limpo ao mudar de perfil)
+                // O histórico de chat NUNCA é apagado ao mudar de perfil —
+                // cada perfil simplesmente tem os seus próprios chats.
             } else {
                 if (settings.value.hapticEnabled) {
                     hapticHelper.trigger(HapticHelper.HapticType.ERROR)

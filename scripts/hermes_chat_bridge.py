@@ -114,25 +114,18 @@ def selected_profile():
     if env_p and (env_p == "default" or os.path.isdir(os.path.join(HERMES_HOME, "profiles", env_p))):
         return env_p
 
-    # 2. Ficheiros conhecidos de perfil activo do Hermes CLI e da ponte
-    candidates = [
-        PROFILE_FILE,
-        os.path.join(HERMES_HOME, ".active_profile"),
-        os.path.join(HERMES_HOME, "active_profile"),
-        os.path.join(HERMES_HOME, ".hermes_profile"),
-        os.path.join(HERMES_HOME, ".profile"),
-        os.path.join(HERMES_HOME, "current_profile"),
-        os.path.join(HERMES_HOME, ".current_profile"),
-    ]
-    for cand in candidates:
-        try:
-            with open(cand, "r", encoding="utf-8", errors="replace") as f:
-                p = f.read().strip()
-                if p and (p == "default" or os.path.isdir(os.path.join(HERMES_HOME, "profiles", p))):
-                    return p
-        except OSError:
-            pass
-
+    # 2. Ficheiro sticky canónico do CLI/dashboard (`hermes profile use` / dashboard).
+    #    Semântica EXATA do CLI: ficheiro AUSENTE ou vazio = "default".
+    #    Isto é autoridade nos dois sentidos — sem fallbacks legado: um
+    #    .hermes_chat_profile stale nunca pode sobrepor-se ao dashboard.
+    ap = os.path.join(HERMES_HOME, "active_profile")
+    try:
+        with open(ap, "r", encoding="utf-8", errors="replace") as f:
+            p = f.read().strip()
+    except OSError:
+        return "default"
+    if p and (p == "default" or os.path.isdir(os.path.join(HERMES_HOME, "profiles", p))):
+        return p
     return "default"
 
 
@@ -175,72 +168,54 @@ def agent_name():
     return _profile_name_from_folder(_home_for(p), fallback)
 
 
+def _parse_model_default_from_config(txt):
+    """Extrai model.default (ou model: <val>) de um config.yaml, APENAS dentro do bloco model:"""
+    in_block = False
+    block_indent = -1
+    for raw in txt.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        if in_block and indent <= block_indent:
+            in_block = False
+        if in_block:
+            if stripped.startswith("default:"):
+                val = _clean_model_name(stripped.split(":", 1)[1])
+                if val:
+                    return val
+            continue
+        if stripped.startswith("model:"):
+            after = stripped.split(":", 1)[1].strip()
+            if after and not after.startswith("{"):
+                val = _clean_model_name(after)
+                if val:
+                    return val
+            in_block = True
+            block_indent = indent
+    return ""
+
+
 def _model_default(home):
-    # 1. Override explícito no perfil se foi escolhido pelo utilizador
-    prof_model_file = os.path.join(home, ".hermes_chat_model")
+    # 1. config.yaml do perfil — FONTE DA VERDADE (é o que o dashboard/CLI escreve
+    #    com `hermes config set model.default X`)
     try:
-        with open(prof_model_file, "r", encoding="utf-8", errors="replace") as f:
+        with open(os.path.join(home, "config.yaml"), "r", encoding="utf-8", errors="replace") as f:
+            txt = f.read()
+        m = _parse_model_default_from_config(txt)
+        if m:
+            return m
+    except OSError:
+        pass
+
+    # 2. Override legado da ponte (só se o config não tiver modelo)
+    try:
+        with open(os.path.join(home, ".hermes_chat_model"), "r", encoding="utf-8", errors="replace") as f:
             m = _clean_model_name(f.read())
             if m:
                 return m
     except OSError:
         pass
-
-    # 2. Leitura e parsing do config.yaml do perfil
-    cfg_file = os.path.join(home, "config.yaml")
-    try:
-        with open(cfg_file, "r", encoding="utf-8", errors="replace") as f:
-            lines = f.readlines()
-    except OSError:
-        return ""
-
-    in_model_block = False
-    model_block_indent = -1
-    for line in lines:
-        raw = line.rstrip("\r\n")
-        stripped = raw.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        indent = len(raw) - len(raw.lstrip())
-
-        if in_model_block:
-            if indent <= model_block_indent:
-                in_model_block = False
-            else:
-                if stripped.startswith("default:"):
-                    parts = stripped.split(":", 1)
-                    val = _clean_model_name(parts[1])
-                    if val:
-                        return val
-                elif stripped.startswith("name:"):
-                    parts = stripped.split(":", 1)
-                    val = _clean_model_name(parts[1])
-                    if val:
-                        return val
-
-        if stripped.startswith("model:"):
-            parts = stripped.split(":", 1)
-            after = parts[1].strip()
-            if after and not after.startswith("{"):
-                val = _clean_model_name(after)
-                if val:
-                    return val
-            in_model_block = True
-            model_block_indent = indent
-
-    # Fallback por regex caso o ficheiro use outro formato
-    txt = "\n".join(lines)
-    m = re.search(r"default:\s*['\"]?([a-zA-Z0-9_\-\./]+)['\"]?", txt)
-    if m:
-        val = _clean_model_name(m.group(1))
-        if val:
-            return val
-    m = re.search(r"(?:^|\n)\s*model:\s*['\"]?([a-zA-Z0-9_\-\./]+)['\"]?", txt)
-    if m:
-        val = _clean_model_name(m.group(1))
-        if val:
-            return val
-
     return ""
 
 
@@ -256,30 +231,39 @@ def set_active_model(model):
     if os.path.isfile(cfg_file):
         try:
             with open(cfg_file, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
-            if re.search(r"default:\s*", content):
-                new_content = re.sub(
-                    r"(default:\s*)['\"]?[^'\"\n\r]+['\"]?",
-                    r"\g<1>" + model,
-                    content,
-                    count=1
-                )
-            elif re.search(r"^model:\s*", content, re.M):
-                new_content = re.sub(
-                    r"(^model:\s*)['\"]?[^'\"\n\r]+['\"]?",
-                    r"\g<1>" + model,
-                    content,
-                    count=1,
-                    flags=re.M
-                )
-            else:
-                new_content = content + f"\nmodel:\n  default: {model}\n"
+                lines = f.readlines()
+            out = []
+            in_block = False
+            block_indent = -1
+            replaced = False
+            for raw in lines:
+                stripped = raw.strip()
+                indent = len(raw) - len(raw.lstrip())
+                if in_block and stripped and indent <= block_indent:
+                    in_block = False
+                if not in_block and not replaced and stripped.startswith("model:"):
+                    after = stripped.split(":", 1)[1].strip()
+                    if after and not after.startswith("{"):
+                        out.append(f"model: {model}\n")
+                        replaced = True
+                        continue
+                    out.append(raw)
+                    in_block = True
+                    block_indent = indent
+                    continue
+                if in_block and not replaced and stripped.startswith("default:"):
+                    out.append(raw[:indent] + f"default: {model}\n")
+                    replaced = True
+                    continue
+                out.append(raw)
+            if not replaced:
+                out.append(f"model:\n  default: {model}\n")
             with open(cfg_file, "w", encoding="utf-8") as f:
-                f.write(new_content)
+                f.writelines(out)
         except Exception:
             pass
 
-    # Guarda modelo no perfil e no global
+    # Guarda modelo no perfil e no global (selected_model/agent_model leem daqui)
     try:
         with open(os.path.join(home, ".hermes_chat_model"), "w", encoding="utf-8") as f:
             f.write(model)
@@ -293,20 +277,24 @@ def set_active_profile(prof):
     if prof != "default" and not os.path.isdir(os.path.join(HERMES_HOME, "profiles", prof)):
         return False, None, None
 
-    # Guarda o perfil ativo no ficheiro da ponte e nos ficheiros do CLI
+    canonical = os.path.join(HERMES_HOME, "active_profile")
+
+    # 1. Semântica canónica do CLI: "default" = ficheiro AUSEENTE; outro = ficheiro com o nome
+    try:
+        if prof == "default":
+            if os.path.isfile(canonical):
+                os.remove(canonical)
+        else:
+            with open(canonical, "w", encoding="utf-8") as f:
+                f.write(prof)
+    except OSError:
+        pass
+
+    # 2. Estado legado da ponte (para versões antigas / compatibilidade)
     with open(PROFILE_FILE, "w", encoding="utf-8") as f:
         f.write(prof)
-    for alt in [
-        os.path.join(HERMES_HOME, ".active_profile"),
-        os.path.join(HERMES_HOME, "active_profile")
-    ]:
-        try:
-            with open(alt, "w", encoding="utf-8") as f:
-                f.write(prof)
-        except OSError:
-            pass
 
-    # Sincroniza via CLI do Hermes se o binário estiver no path
+    # 3. Sincroniza via CLI do Hermes se o binário estiver no path
     try:
         import subprocess
         subprocess.run(
@@ -319,7 +307,7 @@ def set_active_profile(prof):
     except Exception:
         pass
 
-    # Ao mudar de perfil, atualiza o modelo ativo para ser o modelo DESSE perfil!
+    # 4. Ao mudar de perfil, o modelo ativo passa a ser o modelo DESSE perfil
     new_home = _home_for(prof)
     prof_model = _model_default(new_home)
     if prof_model:
@@ -339,23 +327,29 @@ def set_active_profile(prof):
     return True, agent_name(), agent_model()
 
 
-def agent_model():
+def effective_model():
+    """Modelo efetivo do perfil ativo — sem fallbacks inventados.
+    '' significa 'não escolhido': deixar o gateway usar o seu default."""
     p = selected_profile()
     home = _home_for(p)
-    # 1. Modelo configurado para o perfil atual
+    # 1. Modelo configurado para o perfil atual (override do utilizador, depois config.yaml)
     mod = _model_default(home)
     if mod:
         return mod
-    # 2. Override do ficheiro global se existir
+    # 2. Espelho global (compatibilidade) — pode estar stale, por isso é último recurso
     sm = selected_model()
     if sm:
         return sm
-    # 3. Fallback para o config default
+    # 3. config global como referência quando o perfil não tem nada próprio
     if p != "default":
         def_mod = _model_default(HERMES_HOME)
         if def_mod:
             return def_mod
-    return "nousresearch/hermes-3-llama-3.1-8b"
+    return ""
+
+
+def agent_model():
+    return effective_model() or "nousresearch/hermes-3-llama-3.1-8b"
 
 
 def list_all_profiles():
@@ -491,7 +485,7 @@ class Handler(BaseHTTPRequestHandler):
             if stripped.startswith("v1/"):
                 path = f"/p/{prof}/{stripped}"
 
-        sm = selected_model()
+        sm = effective_model()
         if sm and body and b'"messages"' in body:
             try:
                 data = json.loads(body.decode("utf-8", "replace"))

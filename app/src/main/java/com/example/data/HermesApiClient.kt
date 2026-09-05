@@ -174,12 +174,46 @@ class HermesApiClient {
     }
 
     suspend fun fetchProfileInfo(baseUrl: String): ProfileDto? = withContext(Dispatchers.IO) {
+        // 1. /profile devolve o estado completo do perfil ativo: {id, profile, name, model}
+        val direct = fetchActiveProfileFull(baseUrl)
+        if (direct != null) return@withContext direct
+
+        // 2. Fallback: lista de perfis (a ponte nova traz modelos; a antiga não)
         val list = fetchProfilesList(baseUrl)
         val base = list?.profiles?.firstOrNull { it.active } ?: list?.profiles?.firstOrNull()
-        // O /profiles (lista) não traz o modelo; o /profile individual (ponte) devolve
-        // {"name": ..., "model": ...}. Captura o modelo real do perfil ativo.
         val model = fetchActiveModel(baseUrl)
-        return@withContext base?.copy(model = model ?: base.model) ?: (if (model != null) ProfileDto(id = "default", name = "Agent T", active = true, model = model) else null)
+        base?.copy(model = model ?: base.model)
+    }
+
+    /** Lê {id, profile, name, model} do GET /profile — a fonte autoritativa do perfil ativo. */
+    private suspend fun fetchActiveProfileFull(baseUrl: String): ProfileDto? = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl).removeSuffix("/")
+        try {
+            val response: HttpResponse = client.get("$normalized/profile") {
+                timeout { requestTimeoutMillis = 3_000; connectTimeoutMillis = 3_000 }
+            }
+            if (response.status.isSuccess()) {
+                val element = jsonConfig.parseToJsonElement(response.bodyAsText())
+                if (element is JsonObject) {
+                    val id = element["id"]?.jsonPrimitive?.contentOrNull
+                        ?: element["profile"]?.jsonPrimitive?.contentOrNull
+                    val name = element["alias"]?.jsonPrimitive?.contentOrNull
+                        ?: element["name"]?.jsonPrimitive?.contentOrNull
+                    val model = element["model"]?.jsonPrimitive?.contentOrNull
+                    // Só aceita se trouxer o ID — bridges antigas devolvem só {name, model}
+                    // e a identidade tem de vir da lista de perfis, não de um id inventado
+                    if (!id.isNullOrBlank()) {
+                        return@withContext ProfileDto(
+                            id = id,
+                            name = name?.takeIf { it.isNotBlank() } ?: id,
+                            active = true,
+                            model = model ?: ""
+                        )
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return@withContext null
     }
 
     /** Lê o modelo real do perfil ativo via GET /profile (ponte 9120). */
@@ -209,6 +243,7 @@ class HermesApiClient {
     suspend fun fetchProfilesList(baseUrl: String): ProfileListResponse? = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl).removeSuffix("/")
         val candidates = listOf("/profiles", "/api/profiles", "/profile")
+        var gotNetworkResponse = false
         for (path in candidates) {
             try {
                 val response: HttpResponse = client.get("$normalized$path") {
@@ -218,6 +253,7 @@ class HermesApiClient {
                         socketTimeoutMillis = 3_000
                     }
                 }
+                gotNetworkResponse = true
                 if (response.status.isSuccess()) {
                     val text = response.bodyAsText()
                     val element = jsonConfig.parseToJsonElement(text)
@@ -228,11 +264,12 @@ class HermesApiClient {
                             val name = element["alias"]?.jsonPrimitive?.contentOrNull
                                 ?: element["name"]?.jsonPrimitive?.contentOrNull ?: "Hermes"
                             val prof = element["profile"]?.jsonPrimitive?.contentOrNull ?: "default"
+                            val model = element["model"]?.jsonPrimitive?.contentOrNull ?: ""
+                            // Devolve APENAS o perfil real ativo — nada de entradas fantasmas
                             return@withContext ProfileListResponse(
                                 current = prof,
                                 profiles = listOf(
-                                    ProfileDto(id = "default", name = if (prof == "default") name else "Agent T", active = (prof == "default")),
-                                    ProfileDto(id = "tara", name = if (prof == "tara") name else "Tara", active = (prof == "tara"))
+                                    ProfileDto(id = prof, name = name, active = true, model = model)
                                 )
                             )
                         }
@@ -240,13 +277,17 @@ class HermesApiClient {
                 }
             } catch (_: Exception) {}
         }
-        return@withContext ProfileListResponse(
-            current = "default",
-            profiles = listOf(
-                ProfileDto(id = "default", name = "Agent T", active = true),
-                ProfileDto(id = "tara", name = "Tara", active = false)
+        // Ponte offline: NÃO inventar perfis — devolver null deixa o estado da app intacto
+        return@withContext if (gotNetworkResponse) {
+            ProfileListResponse(
+                current = "default",
+                profiles = listOf(
+                    ProfileDto(id = "default", name = "Agent T", active = true)
+                )
             )
-        )
+        } else {
+            null
+        }
     }
 
     suspend fun selectProfile(baseUrl: String, profileId: String): Boolean = withContext(Dispatchers.IO) {
