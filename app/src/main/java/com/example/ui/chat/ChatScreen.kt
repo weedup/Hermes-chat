@@ -3,11 +3,11 @@ package com.example.ui.chat
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.annotation.SuppressLint
 import android.os.Build
 import android.widget.Toast
-import androidx.annotation.SuppressLint
 import android.window.OnBackInvokedCallback
-import android.window.PRIORITY_OVERLAY
+import android.window.OnBackInvokedDispatcher
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -219,7 +219,7 @@ fun ChatScreen(
         DisposableEffect(onBackInvokedDispatcher, interceptActive) {
             if (interceptActive) {
                 onBackInvokedDispatcher.registerOnBackInvokedCallback(
-                    PRIORITY_OVERLAY,
+                    OnBackInvokedDispatcher.PRIORITY_OVERLAY,
                     hideKeyboardKeepMenus
                 )
             }
