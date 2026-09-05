@@ -156,6 +156,30 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         refreshProfileInfo()
         refreshModels()
         observeQueue()
+        // Polling do modelo: verifica a cada 10s se o modelo mudou no dashboard/bridge
+        startModelSyncPolling()
+    }
+
+    private fun startModelSyncPolling() {
+        viewModelScope.launch {
+            while (true) {
+                delay(10_000) // 10 segundos
+                try {
+                    val prof = apiClient.fetchProfileInfo(settings.value.serverUrl)
+                    if (prof != null) {
+                        val pMod = prof.model.trim()
+                        if (pMod.isNotBlank() && !pMod.equals("hermes-agent", ignoreCase = true) && !pMod.equals("hermes", ignoreCase = true)) {
+                            val old = _agentModel.value
+                            if (!pMod.equals(old, ignoreCase = true)) {
+                                _agentModel.value = pMod
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    // Silencioso — se a bridge está off, tenta de novo no próximo ciclo
+                }
+            }
+        }
     }
 
     private fun observeQueue() {
