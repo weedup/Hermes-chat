@@ -94,6 +94,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.ModalBottomSheetProperties
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -660,7 +662,20 @@ fun ChatScreen(
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
             title = { Text("Limpar Conversa?", color = TextPrimary, fontWeight = FontWeight.Bold) },
-            text = { Text("Todas as mensagens desta conversa serão apagadas localmente.", color = TextSecondary) },
+            text = {
+                // O back nativo do dialog está desligado (dismissOnBackPress=false);
+                // este é o dono do back aqui: teclado levantado → baixa só teclado;
+                // senão → fecha o dialog.
+                BackHandler(enabled = true) {
+                    if (isImeVisible) {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                    } else {
+                        showClearDialog = false
+                    }
+                }
+                Text("Todas as mensagens desta conversa serão apagadas localmente.", color = TextSecondary)
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -677,7 +692,8 @@ fun ChatScreen(
                 }
             },
             containerColor = NavySurfaceCard,
-            shape = RoundedCornerShape(16.dp)
+            shape = RoundedCornerShape(16.dp),
+            properties = DialogProperties(dismissOnBackPress = false)
         )
     }
 
@@ -694,6 +710,16 @@ fun ChatScreen(
         AlertDialog(
             onDismissRequest = { showProfileDialog = false },
             title = {
+                // Back do dialog desligado (dismissOnBackPress=false); este dono
+                // interno faz a coreografia: teclado → só teclado; senão → fecha.
+                BackHandler(enabled = true) {
+                    if (isImeVisible) {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                    } else {
+                        showProfileDialog = false
+                    }
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -786,7 +812,8 @@ fun ChatScreen(
                 }
             },
             containerColor = NavyDeep,
-            shape = RoundedCornerShape(20.dp)
+            shape = RoundedCornerShape(20.dp),
+            properties = DialogProperties(dismissOnBackPress = false)
         )
     }
 
@@ -838,6 +865,9 @@ fun ChatScreen(
         ModalBottomSheet(
             onDismissRequest = { showModelSheet = false },
             sheetState = sheetState,
+            // O back nativo do sheet é desligado: o BackHandler interno abaixo faz a
+            // coreografia certa (1º back com teclado = baixa só teclado; 2º = fecha).
+            properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false),
             containerColor = NavyDeep,
             dragHandle = {
                 Box(
@@ -851,6 +881,19 @@ fun ChatScreen(
             },
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
         ) {
+            // BackHandler DENTRO da janela do sheet: o back nativo do sheet está
+            // desligado (shouldDismissOnBackPress=false acima), por isso este é o
+            // único dono do back aqui. 1º toque com teclado levantado = baixa só o
+            // teclado; 2º toque = fecha o sheet. Sem isto, o sheet animava o seu
+            // fecho no MESMO toque que baixava o teclado ("vinham os dois juntos").
+            BackHandler(enabled = true) {
+                if (isImeVisible) {
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                } else {
+                    showModelSheet = false
+                }
+            }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
