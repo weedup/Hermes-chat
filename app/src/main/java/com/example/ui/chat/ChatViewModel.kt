@@ -165,18 +165,41 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             while (true) {
                 delay(10_000) // 10 segundos
                 try {
+                    val allProfs = apiClient.fetchAllProfiles(settings.value.serverUrl)
+                    if (allProfs.isNotEmpty()) {
+                        _availableProfiles.value = allProfs
+                        val active = allProfs.firstOrNull { it.active }
+                        if (active != null) {
+                            if (!active.name.equals(_agentName.value, ignoreCase = true)) {
+                                _agentName.value = active.name
+                            }
+                            val aMod = active.model.trim()
+                            if (aMod.isNotBlank() && !aMod.equals("hermes-agent", ignoreCase = true) && !aMod.equals("hermes", ignoreCase = true)) {
+                                val old = _agentModel.value
+                                if (!aMod.equals(old, ignoreCase = true)) {
+                                    _agentModel.value = aMod
+                                    preferencesManager.updateModelName(aMod)
+                                }
+                            }
+                        }
+                    }
                     val prof = apiClient.fetchProfileInfo(settings.value.serverUrl)
                     if (prof != null) {
+                        val pName = prof.name.trim()
+                        if (pName.isNotBlank() && !pName.equals(_agentName.value, ignoreCase = true)) {
+                            _agentName.value = pName
+                        }
                         val pMod = prof.model.trim()
                         if (pMod.isNotBlank() && !pMod.equals("hermes-agent", ignoreCase = true) && !pMod.equals("hermes", ignoreCase = true)) {
                             val old = _agentModel.value
                             if (!pMod.equals(old, ignoreCase = true)) {
                                 _agentModel.value = pMod
+                                preferencesManager.updateModelName(pMod)
                             }
                         }
                     }
                 } catch (_: Exception) {
-                    // Silencioso — se a bridge está off, tenta de novo no próximo ciclo
+                    // Silencioso — se a bridge estiver temporariamente desligada
                 }
             }
         }
@@ -243,14 +266,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshProfileInfo() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val prof = apiClient.fetchProfileInfo(settings.value.serverUrl)
-                if (prof != null) {
-                    _agentName.value = prof.name
-                    val pMod = prof.model.trim()
-                    if (pMod.isNotBlank() && !pMod.equals("hermes-agent", ignoreCase = true) && !pMod.equals("hermes", ignoreCase = true)) {
-                        _agentModel.value = pMod
-                    }
-                }
+                // 1. Obtém lista com todos os perfis e os respetivos modelos
                 val allProfs = apiClient.fetchAllProfiles(settings.value.serverUrl)
                 if (allProfs.isNotEmpty()) {
                     _availableProfiles.value = allProfs
@@ -260,7 +276,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         val aMod = active.model.trim()
                         if (aMod.isNotBlank() && !aMod.equals("hermes-agent", ignoreCase = true) && !aMod.equals("hermes", ignoreCase = true)) {
                             _agentModel.value = aMod
+                            preferencesManager.updateModelName(aMod)
                         }
+                    }
+                }
+                // 2. Confirmação do perfil e modelo ativo via /profile
+                val prof = apiClient.fetchProfileInfo(settings.value.serverUrl)
+                if (prof != null) {
+                    _agentName.value = prof.name
+                    val pMod = prof.model.trim()
+                    if (pMod.isNotBlank() && !pMod.equals("hermes-agent", ignoreCase = true) && !pMod.equals("hermes", ignoreCase = true)) {
+                        _agentModel.value = pMod
+                        preferencesManager.updateModelName(pMod)
                     }
                 }
             } catch (_: Exception) {}
@@ -269,17 +296,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun switchProfile(profileId: String, displayName: String) {
         viewModelScope.launch(Dispatchers.IO) {
+            // Identifica previamente o modelo configurado no perfil alvo
+            val targetProfile = _availableProfiles.value.firstOrNull { it.id == profileId }
+            val targetModel = targetProfile?.model?.trim()?.takeIf {
+                it.isNotBlank() && !it.equals("hermes-agent", ignoreCase = true) && !it.equals("hermes", ignoreCase = true)
+            }
+
             val ok = apiClient.switchProfile(settings.value.serverUrl, profileId)
             if (ok) {
                 _agentName.value = displayName
-                refreshProfileInfo()
-                // Limpar histórico da sessão atual — cada profile tem o seu chat
-                viewModelScope.launch {
-                    repository.clearHistory(_currentSessionId.value)
-                    if (settings.value.hapticEnabled) {
-                        hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
-                    }
+                if (targetModel != null) {
+                    _agentModel.value = targetModel
+                    preferencesManager.updateModelName(targetModel)
                 }
+                // Sincroniza imediatamente com o servidor para confirmar estado
+                refreshProfileInfo()
+                if (settings.value.hapticEnabled) {
+                    hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
+                }
+                // NOTA: O histórico de chat da sessão é intencionalmente preservado (não é limpo ao mudar de perfil)
             } else {
                 if (settings.value.hapticEnabled) {
                     hapticHelper.trigger(HapticHelper.HapticType.ERROR)

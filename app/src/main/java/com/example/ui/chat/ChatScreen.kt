@@ -268,6 +268,12 @@ fun ChatScreen(
         }
     }
 
+    // Sincroniza o perfil e modelo ativo assim que o ecrã abre / reentra
+    LaunchedEffect(Unit) {
+        viewModel.refreshProfileInfo()
+        viewModel.refreshModels()
+    }
+
     // Fecha a gaveta de conversas quando se muda de sessão/janela
     LaunchedEffect(currentSessionId) {
         if (drawerState.isOpen) drawerState.close()
@@ -787,11 +793,30 @@ fun ChatScreen(
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                     fontSize = 15.sp
                                 )
-                                Text(
-                                    text = "Perfil: ${prof.id}",
-                                    color = TextTertiary,
-                                    fontSize = 11.sp
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "Perfil: ${prof.id}",
+                                        color = TextTertiary,
+                                        fontSize = 11.sp
+                                    )
+                                    val cleanMod = prof.model.trim()
+                                    if (cleanMod.isNotBlank() && !cleanMod.equals("hermes-agent", ignoreCase = true) && !cleanMod.equals("hermes", ignoreCase = true)) {
+                                        Text(
+                                            text = "•",
+                                            color = TextTertiary,
+                                            fontSize = 10.sp
+                                        )
+                                        Text(
+                                            text = cleanMod.substringAfterLast('/'),
+                                            color = if (isSelected) GoldPrimary else TextSecondary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
                             }
                             if (isSelected) {
                                 Icon(
