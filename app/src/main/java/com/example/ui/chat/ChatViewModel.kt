@@ -68,10 +68,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun msgSessionBelongsTo(sessionId: String, profileId: String): Boolean =
         if (profileId == "default") !sessionId.contains("__")
-        else sessionId.startsWith("$profileId__")
+        else sessionId.startsWith("${profileId}__")
 
     private fun sessionIdFor(profileId: String, base: String): String =
-        if (profileId == "default") base else "$profileId__$base"
+        if (profileId == "default") base else "${profileId}__$base"
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val messages: StateFlow<List<ChatMessage>> = _currentSessionId
