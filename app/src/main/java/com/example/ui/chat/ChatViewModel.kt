@@ -198,6 +198,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectSession(sessionId: String) {
         _currentSessionId.value = sessionId
+        // Atualizar modelo do dashboard quando mudas de session
+        viewModelScope.launch {
+            refreshProfileInfo()
+        }
         // Finaliza bolhas órfãs da sessão visitada (app morreu/reiniciou a meio da geração)
         viewModelScope.launch {
             val stuck = repository.getStuckMessages(sessionId)
