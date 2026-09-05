@@ -25,6 +25,40 @@ DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 9119
 _DASH_TOKEN_CACHE = {"token": None, "ts": 0.0}
 
+# ---- Fila de notificações (crons -> app via polling) ----
+# POST /notify {title, body, tag}  -> acrescenta
+# GET  /notify/pending            -> devolve e limpa (leitura destrutiva)
+import threading
+import time as _time
+
+_NOTIFY_LOCK = threading.Lock()
+_NOTIFY_QUEUE = []
+_NOTIFY_SEQ = [0]
+_NOTIFY_TTL = 24 * 3600  # descarta notificações com mais de 24h
+
+
+def notify_push(title, body, tag):
+    with _NOTIFY_LOCK:
+        now = _time.time()
+        # purge de entradas velhas
+        _NOTIFY_QUEUE[:] = [n for n in _NOTIFY_QUEUE if now - n["ts"] < _NOTIFY_TTL]
+        _NOTIFY_SEQ[0] += 1
+        _NOTIFY_QUEUE.append({
+            "id": _NOTIFY_SEQ[0],
+            "title": str(title or "Hermes")[:200],
+            "body": str(body or "")[:2000],
+            "tag": str(tag or "hermes")[:50],
+            "ts": int(now),
+        })
+        return len(_NOTIFY_QUEUE)
+
+
+def notify_drain():
+    with _NOTIFY_LOCK:
+        out = list(_NOTIFY_QUEUE)
+        _NOTIFY_QUEUE.clear()
+        return out
+
 
 def _dashboard_token():
     import time
@@ -575,12 +609,27 @@ class Handler(BaseHTTPRequestHandler):
             st, payload = dashboard("/api/analytics/usage?days=30")
             _send_json(self, payload, status=st)
             return
+        if self.path.rstrip("/") == "/notify/pending":
+            _send_json(self, {"notifications": notify_drain()})
+            return
 
         self._relay()
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length else None
+        if self.path.rstrip("/") == "/notify":
+            try:
+                data = json.loads((body or b"{}").decode())
+                n = notify_push(
+                    data.get("title") or data.get("text") or "Hermes",
+                    data.get("body") or data.get("message") or "",
+                    data.get("tag") or "hermes",
+                )
+                _send_json(self, {"success": True, "queued": n})
+            except Exception as e:
+                _send_json(self, {"success": False, "error": str(e)}, status=400)
+            return
         if self.path.rstrip("/") in ("/model/select", "/model"):
             try:
                 data = json.loads((body or b"{}").decode())

@@ -76,6 +76,22 @@ data class ProfileDto(
     val model: String = ""
 )
 
+// ---- Notificações via bridge (fila POST /notify -> GET /notify/pending) ----
+
+@Serializable
+data class BridgeNotification(
+    val id: Long = 0,
+    val title: String = "",
+    val body: String = "",
+    val tag: String = "hermes",
+    val ts: Long = 0
+)
+
+@Serializable
+data class PendingNotificationsResponse(
+    val notifications: List<BridgeNotification> = emptyList()
+)
+
 @Serializable
 data class ProfileListResponse(
     val current: String = "default",

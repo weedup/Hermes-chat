@@ -307,6 +307,34 @@ class HermesApiClient {
         }
     }
 
+    /** Busca notificações pendentes na bridge (POST /notify dos crons).
+     *  Devolve null se o endpoint não existir (bridge antiga) ou falhar. */
+    suspend fun fetchPendingNotifications(baseUrl: String): List<BridgeNotification>? = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl).removeSuffix("/")
+        try {
+            val response: HttpResponse = client.get("$normalized/notify/pending") {
+                timeout { requestTimeoutMillis = 3_000; connectTimeoutMillis = 3_000 }
+            }
+            if (response.status.isSuccess()) {
+                val element = jsonConfig.parseToJsonElement(response.bodyAsText())
+                if (element is JsonObject) {
+                    val arr = element["notifications"]?.jsonArray ?: return@withContext emptyList()
+                    return@withContext arr.mapNotNull { item ->
+                        try {
+                            jsonConfig.decodeFromJsonElement(BridgeNotification.serializer(), item)
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+                }
+                return@withContext emptyList()
+            }
+            null // 404 = bridge antiga sem o endpoint
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     suspend fun sendMessage(
         baseUrl: String,
         history: List<ChatMessage>,

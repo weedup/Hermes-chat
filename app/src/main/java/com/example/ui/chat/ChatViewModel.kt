@@ -17,6 +17,7 @@ import com.example.data.ServerHealth
 import com.example.data.SessionSummary
 import com.example.data.AnalyticsResponse
 import com.example.util.HapticHelper
+import com.example.util.NotificationHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -37,6 +38,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val preferencesManager = PreferencesManager(application)
     private val apiClient = HermesApiClient()
     val hapticHelper = HapticHelper(application)
+    private val notificationHelper = NotificationHelper(application)
 
     // ---- Sessões por perfil: cada perfil tem os seus próprios chats ----
     // O ID lógico é "<profile>__<uuid>" mas a Room guarda o id como está (sem migração).
@@ -201,6 +203,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     val prof = apiClient.fetchProfileInfo(settings.value.serverUrl)
                     if (prof != null) {
                         setActiveProfileInternal(prof.id, prof.name, prof.model)
+                    }
+                    // Notificações da bridge (crons): busca pendentes e mostra
+                    val pending = apiClient.fetchPendingNotifications(settings.value.serverUrl)
+                    if (!pending.isNullOrEmpty()) {
+                        pending.forEach { n ->
+                            notificationHelper.show(n.tag, n.title.ifBlank { "Hermes" }, n.body)
+                        }
                     }
                 } catch (_: Exception) {
                     // Silencioso — se a bridge estiver temporariamente desligada
