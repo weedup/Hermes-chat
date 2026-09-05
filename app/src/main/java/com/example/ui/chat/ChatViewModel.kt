@@ -18,6 +18,7 @@ import com.example.data.SessionSummary
 import com.example.data.AnalyticsResponse
 import com.example.util.HapticHelper
 import com.example.util.NotificationHelper
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -139,7 +141,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _isLoadingModels = MutableStateFlow(false)
     val isLoadingModels: StateFlow<Boolean> = _isLoadingModels.asStateFlow()
 
-    private val _pendingQueue = MutableStateFlow<List<String>>(emptyList())
+    /** Mensagem em fila de espera: sessão onde foi escrita + texto. */
+    data class PendingMsg(val sessionId: String, val text: String)
+
+    private val _pendingQueue = MutableStateFlow<List<PendingMsg>>(emptyList())
     private val _pendingCount = MutableStateFlow(0)
     val pendingCount: StateFlow<Int> = _pendingCount.asStateFlow()
 
@@ -226,7 +231,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     _pendingQueue.value = _pendingQueue.value.drop(1)
                     _pendingCount.value = _pendingQueue.value.size
                     delay(300)
-                    doSend(next)
+                    doSend(next.text, next.sessionId)
                 }
             }
         }
@@ -501,7 +506,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         if (_isGenerating.value) {
-            _pendingQueue.value = _pendingQueue.value + textToSend
+            _pendingQueue.value = _pendingQueue.value +
+                PendingMsg(_currentSessionId.value, textToSend)
             _pendingCount.value = _pendingQueue.value.size
             if (customPrompt == null) _inputText.value = ""
             if (settings.value.hapticEnabled) {
@@ -514,8 +520,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         doSend(textToSend)
     }
 
-    private fun doSend(textToSend: String) {
-        val currentSId = _currentSessionId.value
+    private fun doSend(textToSend: String, forcedSessionId: String? = null) {
+        // Guarda de race: se entretanto outra geração arrancou, devolve à fila.
+        if (_isGenerating.value) {
+            _pendingQueue.value = _pendingQueue.value +
+                PendingMsg(forcedSessionId ?: _currentSessionId.value, textToSend)
+            _pendingCount.value = _pendingQueue.value.size
+            return
+        }
+        // Marca sincronamente (antes do launch): fecha a janela em que um segundo
+        // doSend passava o check enquanto o primeiro ainda não tinha posto true.
+        _isGenerating.value = true
+
+        val currentSId = forcedSessionId ?: _currentSessionId.value
         val userMsgId = UUID.randomUUID().toString()
         val userMsg = ChatMessage(
             id = userMsgId,
@@ -541,26 +558,48 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             modelName = initialModel
         )
 
-        viewModelScope.launch {
-            if (settings.value.hapticEnabled) {
-                hapticHelper.trigger(HapticHelper.HapticType.CLICK)
+        val job = viewModelScope.launch {
+            try {
+                if (settings.value.hapticEnabled) {
+                    hapticHelper.trigger(HapticHelper.HapticType.CLICK)
+                }
+
+                // Histórico direto da DB da sessão de DESTINO: mensagens em fila
+                // podem ter sido escritas noutra sessão que a que estás a ver.
+                val sessionMsgs = repository.getMessagesForSession(currentSId).first()
+
+                repository.insertMessage(userMsg)
+                repository.insertMessage(pendingHermesMsg)
+
+                // Atualiza título da sessão se for o primeiro prompt dela
+                if (sessionMsgs.isEmpty()) {
+                    val titlePreview = if (textToSend.length > 25) textToSend.take(25) + "..." else textToSend
+                    repository.updateSessionTitle(currentSId, titlePreview)
+                }
+
+                // Histórico antes da nova mensagem do utilizador
+                val history = sessionMsgs.filter { it.status == MessageStatus.SENT }
+
+                executeModelGeneration(pendingHermesMsg, history, textToSend)
+            } catch (e: CancellationException) {
+                _isGenerating.value = false
+                throw e
+            } catch (e: Exception) {
+                // Se algo rebentar antes da geração arrancar, nunca deixar
+                // isGenerating preso — senão a fila bloqueia para sempre.
+                _isGenerating.value = false
+                repository.updateMessage(
+                    pendingHermesMsg.copy(
+                        text = "Erro interno: ${e.message ?: "falha inesperada"}",
+                        status = MessageStatus.ERROR,
+                        errorDetails = e.localizedMessage
+                    )
+                )
             }
-
-            repository.insertMessage(userMsg)
-            repository.insertMessage(pendingHermesMsg)
-
-            // Atualiza título da sessão se for o primeiro prompt
-            val currentMsgs = messages.value
-            if (currentMsgs.isEmpty() || currentMsgs.size <= 2) {
-                val titlePreview = if (textToSend.length > 25) textToSend.take(25) + "..." else textToSend
-                repository.updateSessionTitle(currentSId, titlePreview)
-            }
-
-            // Histórico antes da nova mensagem do utilizador
-            val history = messages.value.filter { it.status == MessageStatus.SENT && it.id != userMsgId }
-
-            executeModelGeneration(pendingHermesMsg, history, textToSend)
         }
+        // Atribuído de imediato: o /stop consegue cancelar mesmo que chegue
+        // antes de executeModelGeneration correr.
+        generateJob = job
     }
 
     private suspend fun executeModelGeneration(
@@ -570,7 +609,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         _isGenerating.value = true
         generateJob = kotlin.coroutines.coroutineContext[Job]
+        try {
+            generateInternal(pendingHermesMsg, history, promptText)
+        } finally {
+            // Rede de segurança: exceção ou cancelamento não podem deixar
+            // isGenerating preso a true (bloquearia a fila para sempre).
+            _isGenerating.value = false
+        }
+    }
 
+    private suspend fun generateInternal(
+        pendingHermesMsg: ChatMessage,
+        history: List<ChatMessage>,
+        promptText: String
+    ) {
         val currentSettings = settings.value
 
         // Streaming callback: atualiza texto e raciocínio em tempo real no Room e StateFlow
