@@ -245,8 +245,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (ok) {
                 _agentName.value = displayName
                 refreshProfileInfo()
-                if (settings.value.hapticEnabled) {
-                    hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
+                // Limpar histórico da sessão atual — cada profile tem o seu chat
+                viewModelScope.launch {
+                    repository.clearHistory(_currentSessionId.value)
+                    if (settings.value.hapticEnabled) {
+                        hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
+                    }
                 }
             } else {
                 if (settings.value.hapticEnabled) {

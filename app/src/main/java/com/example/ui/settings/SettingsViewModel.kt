@@ -75,6 +75,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun updateModelName(model: String) {
         viewModelScope.launch {
             preferencesManager.updateModelName(model)
+            // Push model change to bridge (writes to MODEL_FILE + config.yaml)
+            apiClient.selectModel(settings.value.serverUrl, model)
         }
     }
 
