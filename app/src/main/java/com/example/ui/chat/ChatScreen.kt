@@ -196,6 +196,16 @@ fun ChatScreen(
     var showModelSheet by rememberSaveable { mutableStateOf(false) }
     var showMenu by rememberSaveable { mutableStateOf(false) }
 
+    // Fecha todos os popups antes de navegar para outro ecrã: o rememberSaveable
+    // sobrevive à saída de composição, sem isto o dialog reabria ao voltar
+    // das Settings (regressão que o remember simples tinha corrigido).
+    fun closePopups() {
+        showMenu = false
+        showModelSheet = false
+        showProfileDialog = false
+        showClearDialog = false
+    }
+
     // Tecla "para trás" com o teclado levantado e um menu/dialog aberto:
     // esconde SÓ o teclado, sem fechar o menu nem as opções ativas.
     // O BackHandler() normal perdia esta disputa: ModalBottomSheet/AlertDialog
@@ -387,6 +397,7 @@ fun ChatScreen(
                             .clip(RoundedCornerShape(8.dp))
                             .clickable {
                                 scope.launch { drawerState.close() }
+                                closePopups()
                                 onNavigateToSettings()
                             }
                             .padding(10.dp),
@@ -436,6 +447,7 @@ fun ChatScreen(
                     },
                     onSettingsClick = {
                         viewModel.hapticHelper.trigger(HapticHelper.HapticType.CLICK, settings.hapticEnabled)
+                        closePopups()
                         onNavigateToSettings()
                     },
                     onMenuClick = { showMenu = true }
@@ -505,6 +517,7 @@ fun ChatScreen(
                             leadingIcon = { Icon(Icons.Default.Settings, null, tint = GoldAccent) },
                             onClick = {
                                 showMenu = false
+                                closePopups()
                                 onNavigateToSettings()
                             }
                         )
