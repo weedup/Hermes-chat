@@ -721,7 +721,7 @@ fun SettingsScreen(
                     viewModel.resetToDefaults()
                     urlInput = "http://127.0.0.1:9120"
                     modelInput = "hermes-agent"
-                    promptInput = "Tu és o Hermes, um modelo de inteligência artificial de elite a correr localmente no dispositivo via Termux. Sempre que precisares de pensar ou de usar ferramentas, mostra o teu raciocínio passo a passo dentro de uma secção <thinking>...</thinking>."
+                    promptInput = ""
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),

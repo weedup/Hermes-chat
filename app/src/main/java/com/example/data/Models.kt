@@ -49,7 +49,7 @@ data class HermesSettings(
     val serverUrl: String = "http://127.0.0.1:9120",
     val customEndpoint: String = "",
     val modelName: String = "nousresearch/hermes-3-llama-3.1-8b",
-    val systemPrompt: String = "Tu és o Hermes, um modelo de inteligência artificial de elite a correr localmente no dispositivo via Termux. ANTES de cada resposta final, mostra o teu raciocínio passo a passo envolvido obrigatoriamente em <thinking>...</thinking>. O utilizador quer ver o teu pensamento em direto.",
+    val systemPrompt: String = "",
     val temperature: Float = 0.7f,
     val maxTokens: Int = 2048,
     val hapticEnabled: Boolean = true,
