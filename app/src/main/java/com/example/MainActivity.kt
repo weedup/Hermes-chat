@@ -52,6 +52,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestNotificationPermissionIfNeeded()
+        com.example.worker.NotificationPollWorker.schedule(applicationContext)
         setContent {
             val settings by chatViewModel.settings.collectAsState()
             HermesChatTheme(uiDensityScale = settings.uiDensityScale) {

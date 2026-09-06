@@ -723,6 +723,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (currentSettings.hapticEnabled) {
                 hapticHelper.trigger(HapticHelper.HapticType.SUCCESS)
             }
+            if (currentSettings.notificationsEnabled) {
+                val preview = if (cleanText.length > 120) cleanText.take(120) + "..." else cleanText
+                notificationHelper.show("chat_reply_${completedMsg.id}", _agentName.value ?: "Hermes", preview)
+            }
             _serverHealth.value = ServerHealth(
                 isReachable = true,
                 statusCode = 200,
