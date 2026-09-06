@@ -22,6 +22,7 @@ class PreferencesManager(private val context: Context) {
         val KEY_TEMPERATURE = floatPreferencesKey("temperature")
         val KEY_MAX_TOKENS = intPreferencesKey("max_tokens")
         val KEY_HAPTIC_ENABLED = booleanPreferencesKey("haptic_enabled")
+        val KEY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
         val KEY_SPEN_MODE = booleanPreferencesKey("spen_mode_enabled")
         val KEY_UI_DENSITY_SCALE = floatPreferencesKey("ui_density_scale")
 
@@ -52,6 +53,7 @@ class PreferencesManager(private val context: Context) {
             temperature = preferences[KEY_TEMPERATURE] ?: DEFAULT_TEMPERATURE,
             maxTokens = preferences[KEY_MAX_TOKENS] ?: DEFAULT_MAX_TOKENS,
             hapticEnabled = preferences[KEY_HAPTIC_ENABLED] ?: true,
+            notificationsEnabled = preferences[KEY_NOTIFICATIONS_ENABLED] ?: true,
             sPenModeEnabled = preferences[KEY_SPEN_MODE] ?: true,
             uiDensityScale = preferences[KEY_UI_DENSITY_SCALE] ?: DEFAULT_UI_DENSITY_SCALE
         )
@@ -99,6 +101,12 @@ class PreferencesManager(private val context: Context) {
         }
     }
 
+    suspend fun updateNotificationsEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_NOTIFICATIONS_ENABLED] = enabled
+        }
+    }
+
     suspend fun updateSPenModeEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[KEY_SPEN_MODE] = enabled
@@ -119,6 +127,7 @@ class PreferencesManager(private val context: Context) {
             preferences[KEY_TEMPERATURE] = DEFAULT_TEMPERATURE
             preferences[KEY_MAX_TOKENS] = DEFAULT_MAX_TOKENS
             preferences[KEY_HAPTIC_ENABLED] = true
+            preferences[KEY_NOTIFICATIONS_ENABLED] = true
             preferences[KEY_SPEN_MODE] = true
             preferences[KEY_UI_DENSITY_SCALE] = DEFAULT_UI_DENSITY_SCALE
         }

@@ -686,7 +686,7 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Vibração ao Interagir na App",
+                                text = "Feedback Háptico:",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = TextPrimary
@@ -705,6 +705,52 @@ fun SettingsScreen(
                     Switch(
                         checked = settings.hapticEnabled,
                         onCheckedChange = { viewModel.updateHapticEnabled(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = NavyDeep,
+                            checkedTrackColor = GoldPrimary,
+                            uncheckedThumbColor = TextSecondary,
+                            uncheckedTrackColor = NavySurfaceVariant
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Notifications toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Notifications,
+                                contentDescription = null,
+                                tint = GoldAccent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Notificações de Resposta:",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = "Recebe alertas no Android quando uma resposta ou aviso automático é concluído.",
+                            fontSize = 11.5.sp,
+                            color = TextTertiary
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Switch(
+                        checked = settings.notificationsEnabled,
+                        onCheckedChange = { viewModel.updateNotificationsEnabled(it) },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = NavyDeep,
                             checkedTrackColor = GoldPrimary,

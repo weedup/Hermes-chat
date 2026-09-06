@@ -107,6 +107,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun updateNotificationsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesManager.updateNotificationsEnabled(enabled)
+            if (settings.value.hapticEnabled) {
+                hapticHelper.trigger(HapticHelper.HapticType.CLICK)
+            }
+        }
+    }
+
     fun updateSPenModeEnabled(enabled: Boolean) {
         viewModelScope.launch {
             preferencesManager.updateSPenModeEnabled(enabled)
